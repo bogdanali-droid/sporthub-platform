@@ -1,0 +1,227 @@
+---
+import AdminLayout from '@/layouts/AdminLayout.astro';
+if (!Astro.locals.user) return Astro.redirect('/login');
+const user = Astro.locals.user;
+const env  = (Astro.locals as any).runtime?.env;
+import { queryAll } from '@/lib/db';
+import { getClubSportConfig } from '@/lib/sport-config';
+
+const [sport, matches, teams] = await Promise.all([
+  getClubSportConfig(env.DB, user.club_id!),
+  queryAll<any>(env.DB,
+    `SELECT m.*, t.name AS team_name FROM matches m
+     JOIN teams t ON t.id = m.team_id
+     WHERE m.club_id = ? ORDER BY m.match_date DESC LIMIT 60`,
+    [user.club_id]),
+  queryAll<any>(env.DB,
+    `SELECT id, name FROM teams WHERE club_id=? AND is_active=1 ORDER BY name`,
+    [user.club_id]),
+]);
+
+const statusLabel: Record<string,string> = { SCHEDULED:'Planificat', LIVE:'Live', FINISHED:'Terminat', CANCELLED:'Anulat' };
+const periodsLabel = sport?.periodsLabel ?? 'Perioadă';
+---
+
+<AdminLayout title="Meciuri" user={user} sportCode={sport?.code} sportIcon={sport?.icon}>
+
+  <div class="toolbar">
+    <select id="filter-status" onchange="filterRows()" class="filter-sel">
+      <option value="">Toate</option>
+      <option value="SCHEDULED">Planificate</option>
+      <option value="LIVE">Live</option>
+      <option value="FINISHED">Terminate</option>
+      <option value="CANCELLED">Anulate</option>
+    </select>
+    <button class="btn-primary" onclick="openModal()">+ Meci nou</button>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>Adversar</th><th>Echipă</th><th>Data</th>
+        <th>Teren</th><th>Scor</th><th>Status</th><th>Acțiuni</th>
+      </tr></thead>
+      <tbody id="tbody">
+        {matches.map(m => (
+          <tr data-status={m.status}>
+            <td>
+              <div class="fw600">{m.is_home ? '🏠' : '✈️'} vs {m.opponent_name}</div>
+              <div class="text-sm text-gray">{m.competition ?? ''}</div>
+            </td>
+            <td>{m.team_name}</td>
+            <td>{m.match_date?.slice(0,10)}</td>
+            <td>{m.location ?? '—'}</td>
+            <td class="score">
+              {m.score_home != null
+                ? <strong>{m.score_home} – {m.score_away}</strong>
+                : <span class="text-gray">—</span>}
+            </td>
+            <td><span class={`badge badge--${(m.status||'SCHEDULED').toLowerCase()}`}>{statusLabel[m.status] ?? m.status}</span></td>
+            <td>
+              <button class="btn-icon" onclick={`editMatch('${m.id}')`}>✏️</button>
+              <a class="btn-icon" href={`/admin/matches/${m.id}/squad`} title="Lot">👥</a>
+              <button class="btn-icon" onclick={`deleteMatch('${m.id}')`}>🗑️</button>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- MODAL -->
+  <div id="modal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-head">
+        <h2 id="modal-title">Meci nou</h2>
+        <button onclick="closeModal()" class="btn-close">×</button>
+      </div>
+      <form id="match-form" class="modal-body">
+        <input type="hidden" id="match-id" />
+        <div class="form-row">
+          <div class="form-group">
+            <label>Echipă *</label>
+            <select id="f-team" required>
+              <option value="">Selectează</option>
+              {teams.map(t => <option value={t.id}>{t.name}</option>)}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Adversar *</label>
+            <input id="f-opponent" required placeholder="Numele echipei adverse" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Data *</label>
+            <input id="f-date" type="date" required />
+          </div>
+          <div class="form-group">
+            <label>Teren</label>
+            <input id="f-location" placeholder="Stadion / Sală" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Competiție</label>
+            <input id="f-competition" placeholder="ex: Liga Națională" />
+          </div>
+          <div class="form-group">
+            <label>Teren propriu?</label>
+            <select id="f-home">
+              <option value="1">Acasă 🏠</option>
+              <option value="0">Deplasare ✈️</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Scor {sport?.name_ro ?? ''} (noi)</label>
+            <input id="f-score-home" type="number" min="0" placeholder="—" />
+          </div>
+          <div class="form-group">
+            <label>Scor adversar</label>
+            <input id="f-score-away" type="number" min="0" placeholder="—" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Status</label>
+          <select id="f-status">
+            <option value="SCHEDULED">Planificat</option>
+            <option value="LIVE">Live</option>
+            <option value="FINISHED">Terminat</option>
+            <option value="CANCELLED">Anulat</option>
+          </select>
+        </div>
+        <div class="modal-footer">
+          <button type="button" onclick="closeModal()" class="btn-secondary">Anulează</button>
+          <button type="submit" class="btn-primary">Salvează</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</AdminLayout>
+
+<style>
+  .toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+  .filter-sel{padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:13px;font-family:inherit}
+  .table-wrap{background:#fff;border-radius:12px;overflow:auto;box-shadow:0 1px 4px rgba(0,0,0,.07)}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th{text-align:left;padding:12px 16px;border-bottom:2px solid #f1f5f9;color:#64748b;font-size:12px;font-weight:600;text-transform:uppercase}
+  td{padding:11px 16px;border-bottom:1px solid #f8fafc}
+  tr:last-child td{border-bottom:none}
+  .fw600{font-weight:600;color:#1e293b}.text-sm{font-size:12px}.text-gray{color:#94a3b8}
+  .score{font-size:15px;font-weight:700;color:#1e293b}
+  .badge{padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;text-transform:uppercase}
+  .badge--scheduled{background:#dbeafe;color:#1e40af}
+  .badge--live{background:#fef3c7;color:#92400e;animation:pulse 1.5s infinite}
+  .badge--finished{background:#d1fae5;color:#065f46}
+  .badge--cancelled{background:#fee2e2;color:#991b1b}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
+  .btn-icon{background:none;border:none;cursor:pointer;font-size:15px;padding:3px 5px;border-radius:4px;text-decoration:none}
+  .btn-icon:hover{background:#f1f5f9}
+  .btn-primary{background:#0f4c81;color:#fff;border:none;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;font-family:inherit}
+  .btn-secondary{background:#f1f5f9;color:#374151;border:none;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;font-family:inherit}
+  .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:flex;align-items:center;justify-content:center;padding:16px}
+  .modal-overlay.hidden{display:none}
+  .modal{background:#fff;border-radius:16px;width:100%;max-width:520px;max-height:90vh;overflow-y:auto}
+  .modal-head{display:flex;justify-content:space-between;align-items:center;padding:20px 24px;border-bottom:1px solid #f1f5f9}
+  .modal-head h2{font-size:18px;color:#1e293b}
+  .btn-close{background:none;border:none;font-size:22px;cursor:pointer;color:#64748b}
+  .modal-body{padding:24px}
+  .form-row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .form-group{margin-bottom:16px}
+  .form-group label{display:block;font-size:13px;font-weight:500;color:#374151;margin-bottom:6px}
+  .form-group input,.form-group select{width:100%;padding:9px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;font-family:inherit}
+  .modal-footer{display:flex;justify-content:flex-end;gap:10px;padding-top:8px}
+</style>
+
+<script>
+  function filterRows() {
+    const s = (document.getElementById('filter-status') as HTMLSelectElement).value;
+    document.querySelectorAll<HTMLTableRowElement>('#tbody tr').forEach(r => {
+      r.style.display = !s || r.dataset.status === s ? '' : 'none';
+    });
+  }
+  let editingId: string | null = null;
+  function openModal() { editingId=null; (document.getElementById('modal-title') as HTMLElement).textContent='Meci nou'; (document.getElementById('match-form') as HTMLFormElement).reset(); (document.getElementById('modal') as HTMLElement).classList.remove('hidden'); }
+  function closeModal() { (document.getElementById('modal') as HTMLElement).classList.add('hidden'); }
+  async function editMatch(id: string) {
+    const r = await fetch(`/api/admin/matches/${id}`); if(!r.ok) return;
+    const m = await r.json(); editingId = id;
+    (document.getElementById('modal-title') as HTMLElement).textContent='Editează meci';
+    (document.getElementById('f-team') as HTMLSelectElement).value = m.team_id??'';
+    (document.getElementById('f-opponent') as HTMLInputElement).value = m.opponent_name??'';
+    (document.getElementById('f-date') as HTMLInputElement).value = m.match_date?.slice(0,10)??'';
+    (document.getElementById('f-location') as HTMLInputElement).value = m.location??'';
+    (document.getElementById('f-competition') as HTMLInputElement).value = m.competition??'';
+    (document.getElementById('f-home') as HTMLSelectElement).value = String(m.is_home??1);
+    (document.getElementById('f-score-home') as HTMLInputElement).value = m.score_home??'';
+    (document.getElementById('f-score-away') as HTMLInputElement).value = m.score_away??'';
+    (document.getElementById('f-status') as HTMLSelectElement).value = m.status??'SCHEDULED';
+    (document.getElementById('modal') as HTMLElement).classList.remove('hidden');
+  }
+  async function deleteMatch(id: string) {
+    if(!confirm('Anulezi meciul?')) return;
+    const r = await fetch(`/api/admin/matches/${id}`, {method:'DELETE'});
+    if(r.ok) location.reload();
+  }
+  document.getElementById('match-form')?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const sh = (document.getElementById('f-score-home') as HTMLInputElement).value;
+    const sa = (document.getElementById('f-score-away') as HTMLInputElement).value;
+    const body = {
+      team_id:      (document.getElementById('f-team') as HTMLSelectElement).value,
+      opponent_name:(document.getElementById('f-opponent') as HTMLInputElement).value,
+      match_date:   (document.getElementById('f-date') as HTMLInputElement).value,
+      location:     (document.getElementById('f-location') as HTMLInputElement).value||null,
+      competition:  (document.getElementById('f-competition') as HTMLInputElement).value||null,
+      is_home:      (document.getElementById('f-home') as HTMLSelectElement).value,
+      score_home:   sh !== '' ? Number(sh) : null,
+      score_away:   sa !== '' ? Number(sa) : null,
+      status:       (document.getElementById('f-status') as HTMLSelectElement).value,
+    };
+    const url = editingId ? `/api/admin/matches/${editingId}` : '/api/admin/matches';
+    const r = await fetch(url, { method:editingId?'PUT':'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+    if(r.ok) { closeModal(); location.reload(); } else { const e2=await r.json(); alert(e2.error??'Eroare'); }
+  });
+</script>
