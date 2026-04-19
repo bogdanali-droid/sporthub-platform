@@ -118,8 +118,8 @@ if (Astro.request.method === 'POST') {
 </head>
 <body>
   <div class="card">
-    <h1>\u{1F3DF}\uFE0F Configureaz\u0103 clubul t\u0103u</h1>
-    <p class="subtitle">Primul pas: alege sportul \u0219i creeaz\u0103 contul de administrator.</p>
+    <h1>🏟️ Configurează clubul tău</h1>
+    <p class="subtitle">Primul pas: alege sportul și creează contul de administrator.</p>
 
     {error && <div class="error">{error}</div>}
 
@@ -140,8 +140,8 @@ if (Astro.request.method === 'POST') {
       <label for="club_name">Numele clubului *</label>
       <input id="club_name" name="club_name" placeholder="ex: CS Steaua Baseball" required />
 
-      <label for="city">Ora\u0219</label>
-      <input id="city" name="city" placeholder="Bucure\u0219ti" />
+      <label for="city">Oraș</label>
+      <input id="city" name="city" placeholder="București" />
 
       <hr class="divider" />
 
@@ -150,16 +150,16 @@ if (Astro.request.method === 'POST') {
 
       <div class="row">
         <div>
-          <label for="password">Parol\u0103 *</label>
+          <label for="password">Parolă *</label>
           <input id="password" name="password" type="password" placeholder="min. 8 caractere" required />
         </div>
         <div>
-          <label for="confirm">Confirm\u0103 parola</label>
-          <input id="confirm" name="confirm" type="password" placeholder="repet\u0103 parola" />
+          <label for="confirm">Confirmă parola</label>
+          <input id="confirm" name="confirm" type="password" placeholder="repetă parola" />
         </div>
       </div>
 
-      <button class="btn" type="submit">Creeaz\u0103 clubul \u2192</button>
+      <button class="btn" type="submit">Creează clubul →</button>
     </form>
   </div>
 
@@ -169,6 +169,6 @@ if (Astro.request.method === 'POST') {
       const conf = (document.getElementById('confirm') as HTMLInputElement).value;
       if (pass !== conf) { e.preventDefault(); alert('Parolele nu coincid.'); }
     });
-  <\/script>
+  </script>
 </body>
 </html>
