@@ -2,16 +2,37 @@
 if (Astro.locals.user) return Astro.redirect('/admin');
 
 let error = '';
-let step = 1;
+const env = (Astro.locals as any).runtime?.env;
+const db = env?.DB;
+
+// Sporturi din DB (fallback hardcodat daca DB nu e ready)
+let sports: {code:string, icon:string, name_ro:string}[] = [];
+try {
+  const res = await db?.prepare('SELECT code, icon, name_ro FROM sports WHERE is_active=1 ORDER BY display_order').all();
+  sports = res?.results ?? [];
+} catch {}
+if (!sports.length) {
+  sports = [
+    {code:'RUGBY',icon:'\u{1F3C9}',name_ro:'Rugby'},
+    {code:'BASEBALL5',icon:'\u26BE',name_ro:'Baseball5'},
+    {code:'SOFTBALL',icon:'\u{1F94E}',name_ro:'Softball'},
+    {code:'FOTBAL',icon:'\u26BD',name_ro:'Fotbal'},
+    {code:'HANDBAL',icon:'\u{1F6D1}',name_ro:'Handbal'},
+    {code:'BASCHET',icon:'\u{1F3C0}',name_ro:'Baschet'},
+    {code:'VOLEI',icon:'\u{1F3D0}',name_ro:'Volei'},
+    {code:'TENIS',icon:'\u{1F3BE}',name_ro:'Tenis'},
+    {code:'ATLETISM',icon:'\u{1F3C3}',name_ro:'Atletism'},
+    {code:'INOT',icon:'\u{1F3CA}',name_ro:'\u00cenot'},
+  ];
+}
 
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
   const action = String(form.get('action') ?? '');
-  const env = (Astro.locals as any).runtime?.env;
 
   if (action === 'setup' && env) {
-    const { queryFirst, execute } = await import('@/lib/db');
-    const { hashPassword } = await import('@/lib/auth');
+    const { queryFirst, execute } = await import('../lib/db');
+    const { hashPassword } = await import('../lib/auth');
 
     const clubName   = String(form.get('club_name') ?? '').trim();
     const sportCode  = String(form.get('sport_code') ?? '').trim();
@@ -20,23 +41,20 @@ if (Astro.request.method === 'POST') {
     const adminPass  = String(form.get('password') ?? '');
 
     if (!clubName || !sportCode || !adminEmail || adminPass.length < 8) {
-      error = 'Completează toate câmpurile. Parola min. 8 caractere.';
+      error = 'Completeaz\u0103 toate c\u00e2mpurile. Parola min. 8 caractere.';
     } else {
       const existing = await queryFirst(env.DB, 'SELECT id FROM users WHERE email = ?', [adminEmail]);
       if (existing) {
-        error = 'Există deja un cont cu acest email.';
+        error = 'Exist\u0103 deja un cont cu acest email.';
       } else {
         const hash = await hashPassword(adminPass);
-        await execute(env.DB,
-          `INSERT INTO clubs (sport_code, name, city) VALUES (?, ?, ?)`,
-          [sportCode, clubName, city]);
+        await execute(env.DB, `INSERT INTO clubs (sport_code, name, city) VALUES (?, ?, ?)`, [sportCode, clubName, city]);
         const club = await queryFirst<{id:string}>(env.DB,
-          `SELECT id FROM clubs WHERE name = ? AND sport_code = ? ORDER BY created_at DESC LIMIT 1`,
+          `SELECT id FROM clubs WHERE name=? AND sport_code=? ORDER BY created_at DESC LIMIT 1`,
           [clubName, sportCode]);
         if (club) {
           await execute(env.DB,
-            `INSERT INTO users (club_id, email, password_hash, role, first_name)
-             VALUES (?, ?, ?, 'ADMIN', 'Admin')`,
+            `INSERT INTO users (club_id, email, password_hash, role, first_name) VALUES (?, ?, ?, 'ADMIN', 'Admin')`,
             [club.id, adminEmail, hash]);
           return Astro.redirect('/login?setup=done');
         }
@@ -63,16 +81,16 @@ if (Astro.request.method === 'POST') {
     }
     .card {
       background: #fff; border-radius: 16px; padding: 40px;
-      width: 100%; max-width: 480px; box-shadow: 0 20px 60px rgba(0,0,0,.3);
+      width: 100%; max-width: 560px; box-shadow: 0 20px 60px rgba(0,0,0,.3);
     }
     h1 { font-size: 22px; color: #0f4c81; margin-bottom: 6px; }
     .subtitle { font-size: 14px; color: #64748b; margin-bottom: 28px; }
     label { display: block; font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 6px; }
-    input, select {
+    input {
       width: 100%; padding: 10px 14px; border: 1px solid #d1d5db; border-radius: 8px;
       font-size: 14px; font-family: inherit; margin-bottom: 16px;
     }
-    input:focus, select:focus { outline: none; border-color: #0f4c81; box-shadow: 0 0 0 3px rgba(15,76,129,.15); }
+    input:focus { outline: none; border-color: #0f4c81; box-shadow: 0 0 0 3px rgba(15,76,129,.15); }
     .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .btn {
       width: 100%; padding: 12px; background: #0f4c81; color: #fff;
@@ -85,23 +103,23 @@ if (Astro.request.method === 'POST') {
       padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 16px;
     }
     .sport-grid {
-      display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px;
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 20px;
     }
     .sport-card {
-      border: 2px solid #e2e8f0; border-radius: 10px; padding: 12px 8px;
+      border: 2px solid #e2e8f0; border-radius: 10px; padding: 10px 6px;
       text-align: center; cursor: pointer; transition: border .2s, background .2s;
     }
     .sport-card input[type=radio] { display: none; }
     .sport-card:has(input:checked) { border-color: #0f4c81; background: #eff6ff; }
-    .sport-card .icon { font-size: 26px; display: block; }
-    .sport-card .name { font-size: 12px; font-weight: 500; color: #374151; margin-top: 6px; }
+    .sport-card .icon { font-size: 24px; display: block; }
+    .sport-card .name { font-size: 11px; font-weight: 500; color: #374151; margin-top: 4px; }
     .divider { border: none; border-top: 1px solid #e2e8f0; margin: 20px 0; }
   </style>
 </head>
 <body>
   <div class="card">
-    <h1>🏟️ Configurează clubul tău</h1>
-    <p class="subtitle">Primul pas: alege sportul și creează contul de administrator.</p>
+    <h1>\u{1F3DF}\uFE0F Configureaz\u0103 clubul t\u0103u</h1>
+    <p class="subtitle">Primul pas: alege sportul \u0219i creeaz\u0103 contul de administrator.</p>
 
     {error && <div class="error">{error}</div>}
 
@@ -110,18 +128,11 @@ if (Astro.request.method === 'POST') {
 
       <label>Alege sportul *</label>
       <div class="sport-grid">
-        {[
-          { code:'RUGBY', icon:'🏉', name:'Rugby' },
-          { code:'BASEBALL5', icon:'⚾', name:'Baseball5' },
-          { code:'SOFTBALL', icon:'🥎', name:'Softball' },
-          { code:'FOTBAL', icon:'⚽', name:'Fotbal' },
-          { code:'HANDBAL', icon:'🛑', name:'Handbal' },
-          { code:'BASCHET', icon:'🏀', name:'Baschet' },
-        ].map(s => (
+        {sports.map((s: any) => (
           <label class="sport-card">
             <input type="radio" name="sport_code" value={s.code} required />
             <span class="icon">{s.icon}</span>
-            <span class="name">{s.name}</span>
+            <span class="name">{s.name_ro}</span>
           </label>
         ))}
       </div>
@@ -129,8 +140,8 @@ if (Astro.request.method === 'POST') {
       <label for="club_name">Numele clubului *</label>
       <input id="club_name" name="club_name" placeholder="ex: CS Steaua Baseball" required />
 
-      <label for="city">Oraș</label>
-      <input id="city" name="city" placeholder="București" />
+      <label for="city">Ora\u0219</label>
+      <input id="city" name="city" placeholder="Bucure\u0219ti" />
 
       <hr class="divider" />
 
@@ -139,16 +150,16 @@ if (Astro.request.method === 'POST') {
 
       <div class="row">
         <div>
-          <label for="password">Parolă *</label>
+          <label for="password">Parol\u0103 *</label>
           <input id="password" name="password" type="password" placeholder="min. 8 caractere" required />
         </div>
         <div>
-          <label for="confirm">Confirmă parola</label>
-          <input id="confirm" name="confirm" type="password" placeholder="repetă parola" />
+          <label for="confirm">Confirm\u0103 parola</label>
+          <input id="confirm" name="confirm" type="password" placeholder="repet\u0103 parola" />
         </div>
       </div>
 
-      <button class="btn" type="submit">Creează clubul →</button>
+      <button class="btn" type="submit">Creeaz\u0103 clubul \u2192</button>
     </form>
   </div>
 
@@ -158,6 +169,6 @@ if (Astro.request.method === 'POST') {
       const conf = (document.getElementById('confirm') as HTMLInputElement).value;
       if (pass !== conf) { e.preventDefault(); alert('Parolele nu coincid.'); }
     });
-  </script>
+  <\/script>
 </body>
 </html>
