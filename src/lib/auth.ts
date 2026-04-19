@@ -1,5 +1,4 @@
-import { D1Database, queryFirst, execute } from './db';
-import bcrypt from 'bcryptjs';
+import { queryFirst, execute } from './db';
 
 export interface SessionUser {
   id: string;
@@ -12,7 +11,26 @@ export interface SessionUser {
   avatar_url: string | null;
 }
 
-const SESSION_TTL = 7 * 24 * 60 * 60; // 7 zile in secunde
+const SESSION_TTL = 7 * 24 * 60 * 60;
+
+async function hashPbkdf2(password: string): Promise<string> {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 100000 }, key, 256);
+  const saltHex = Array.from(salt).map(b => b.toString(16).padStart(2, '0')).join('');
+  const hashHex = Array.from(new Uint8Array(bits)).map(b => b.toString(16).padStart(2, '0')).join('');
+  return `pbkdf2:${saltHex}:${hashHex}`;
+}
+
+async function verifyPbkdf2(password: string, stored: string): Promise<boolean> {
+  const parts = stored.split(':');
+  if (parts.length !== 3 || parts[0] !== 'pbkdf2') return false;
+  const salt = new Uint8Array(parts[1].match(/.{2}/g)!.map(b => parseInt(b, 16)));
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 100000 }, key, 256);
+  const newHash = Array.from(new Uint8Array(bits)).map(b => b.toString(16).padStart(2, '0')).join('');
+  return newHash === parts[2];
+}
 
 export async function login(
   db: D1Database,
@@ -21,7 +39,6 @@ export async function login(
   password: string,
   ip: string
 ): Promise<{ token: string; user: SessionUser } | null> {
-  // Brute-force protection
   const attempts = parseInt(await kv.get(`bf:${ip}`) || '0');
   if (attempts >= 10) return null;
 
@@ -35,7 +52,7 @@ export async function login(
     return null;
   }
 
-  const valid = await bcrypt.compare(password, user.password_hash);
+  const valid = await verifyPbkdf2(password, user.password_hash);
   if (!valid) {
     await kv.put(`bf:${ip}`, String(attempts + 1), { expirationTtl: 900 });
     return null;
@@ -74,22 +91,16 @@ export async function getSession(
   }
 }
 
-export async function refreshSession(
-  token: string,
-  env: { SESSION_KV: KVNamespace }
-): Promise<void> {
+export async function refreshSession(token: string, env: { SESSION_KV: KVNamespace }): Promise<void> {
   const raw = await env.SESSION_KV.get(`session:${token}`);
   if (!raw) return;
   await env.SESSION_KV.put(`session:${token}`, raw, { expirationTtl: SESSION_TTL });
 }
 
-export async function logout(
-  token: string,
-  env: { SESSION_KV: KVNamespace }
-): Promise<void> {
+export async function logout(token: string, env: { SESSION_KV: KVNamespace }): Promise<void> {
   await env.SESSION_KV.delete(`session:${token}`);
 }
 
 export async function hashPassword(password: string): Promise<string> {
-  return bcrypt.hash(password, 12);
+  return hashPbkdf2(password);
 }
