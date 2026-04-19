@@ -1,0 +1,73 @@
+---
+export const prerender = false;
+import AdminLayout from '../../../layouts/AdminLayout.astro';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const db = (Astro.locals as any).runtime?.env?.DB;
+const clubId = user.club_id;
+
+const club = clubId ? await db?.prepare('SELECT * FROM clubs WHERE id=?').bind(clubId).first() as any : null;
+const msg = Astro.url.searchParams.get('msg');
+const err = Astro.url.searchParams.get('err');
+---
+<AdminLayout title="Set\u0103ri club">
+  {msg === 'salvat' && <div class="alert alert-success" style="margin-bottom:16px">Set\u0103ri salvate.</div>}
+  {err && <div class="alert alert-error" style="margin-bottom:16px">Eroare la salvare.</div>}
+
+  <div style="max-width:720px">
+    <h2 style="font-size:20px;font-weight:800;margin-bottom:20px">Set\u0103ri club</h2>
+
+    <div class="card">
+      <form method="POST" action="/api/admin/settings">
+        <h3 style="font-size:14px;font-weight:700;margin-bottom:16px;color:#6b7280;text-transform:uppercase">Informa\u021bii generale</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div class="form-group">
+            <label class="form-label">Numele clubului</label>
+            <input name="name" class="form-input" value={club?.name ?? ''} required />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Ora\u0219</label>
+            <input name="city" class="form-input" value={club?.city ?? ''} />
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div class="form-group">
+            <label class="form-label">Email</label>
+            <input name="email" type="email" class="form-input" value={club?.email ?? ''} />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Telefon</label>
+            <input name="phone" type="tel" class="form-input" value={club?.phone ?? ''} />
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Website</label>
+          <input name="website" class="form-input" value={club?.website ?? ''} />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Adres\u0103</label>
+          <input name="address" class="form-input" value={club?.address ?? ''} />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Motto club</label>
+          <input name="club_motto" class="form-input" value={club?.club_motto ?? ''} />
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div class="form-group">
+            <label class="form-label">Facebook</label>
+            <input name="facebook_url" class="form-input" value={club?.facebook_url ?? ''} />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Instagram</label>
+            <input name="instagram_url" class="form-input" value={club?.instagram_url ?? ''} />
+          </div>
+        </div>
+        <div style="display:flex;justify-content:flex-end">
+          <button type="submit" class="btn btn-primary">Salveaz\u0103</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</AdminLayout>

@@ -1,0 +1,79 @@
+---
+export const prerender = false;
+import AdminLayout from '../../../layouts/AdminLayout.astro';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const db = (Astro.locals as any).runtime?.env?.DB;
+const clubId = user.club_id;
+
+let visits: any[] = [];
+try {
+  const res = await db?.prepare(`
+    SELECT mv.*, p.first_name, p.last_name
+    FROM medical_visits mv JOIN players p ON p.id=mv.player_id
+    WHERE mv.club_id=? ORDER BY mv.visit_date DESC LIMIT 100
+  `).bind(clubId).all();
+  visits = res?.results ?? [];
+} catch {}
+
+const today = new Date().toISOString().slice(0,10);
+const expired = visits.filter((v: any) => v.valid_until && v.valid_until < today).length;
+const expiringSoon = visits.filter((v: any) => {
+  if (!v.valid_until) return false;
+  const diff = (new Date(v.valid_until).getTime() - Date.now()) / 86400000;
+  return diff >= 0 && diff <= 30;
+}).length;
+---
+<AdminLayout title="Medical">
+  <div style="margin-bottom:20px">
+    <h2 style="font-size:20px;font-weight:800">Medical</h2>
+    <p style="color:#6b7280;font-size:13px">Vi\u0219ite medicale \u0219i avize sportive</p>
+  </div>
+
+  {expired > 0 && (
+    <div class="alert alert-error" style="margin-bottom:16px">
+      \u26a0\ufe0f {expired} juc\u0103tor(i) cu aviz medical expirat!
+    </div>
+  )}
+  {expiringSoon > 0 && (
+    <div class="alert alert-warning" style="margin-bottom:16px">
+      \u23f0 {expiringSoon} juc\u0103tor(i) cu aviz ce expir\u0103 \u00een urm\u0103toarele 30 zile.
+    </div>
+  )}
+
+  <div class="card" style="padding:0;overflow:hidden">
+    {visits.length === 0 ? (
+      <div style="padding:60px 24px;text-align:center;color:#9ca3af">
+        <div style="font-size:40px;margin-bottom:12px">\ud83e\ude7a</div>
+        <p style="font-weight:600">Nicio vi\u0219it\u0103 medical\u0103 \u00eenregistrat\u0103</p>
+      </div>
+    ) : (
+      <table class="table">
+        <thead><tr><th>Juc\u0103tor</th><th>Data vi\u0219itei</th><th>Valabil p\u00e2n\u0103</th><th>Medic</th><th>Status</th></tr></thead>
+        <tbody>
+          {visits.map((v: any) => {
+            const isExpired = v.valid_until && v.valid_until < today;
+            const isSoon = !isExpired && v.valid_until && (new Date(v.valid_until).getTime() - Date.now()) / 86400000 <= 30;
+            return (
+              <tr>
+                <td style="font-weight:600">{v.first_name} {v.last_name}</td>
+                <td>{v.visit_date}</td>
+                <td style={`font-weight:600;color:${isExpired ? '#dc2626' : isSoon ? '#d97706' : '#16a34a'}`}>
+                  {v.valid_until || '\u2014'}
+                </td>
+                <td style="color:#6b7280;font-size:13px">{v.doctor_name || '\u2014'}</td>
+                <td>
+                  {isExpired && <span class="badge badge-red">Expirat</span>}
+                  {isSoon && <span class="badge badge-yellow">Expir\u0103 cur\u00e2nd</span>}
+                  {!isExpired && !isSoon && <span class="badge badge-green">Valid</span>}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    )}
+  </div>
+</AdminLayout>

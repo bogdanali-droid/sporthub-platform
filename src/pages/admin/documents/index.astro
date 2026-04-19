@@ -1,0 +1,55 @@
+---
+export const prerender = false;
+import AdminLayout from '../../../layouts/AdminLayout.astro';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const db = (Astro.locals as any).runtime?.env?.DB;
+const clubId = user.club_id;
+
+let docs: any[] = [];
+try {
+  const res = await db?.prepare(`
+    SELECT pd.*, p.first_name, p.last_name
+    FROM player_documents pd JOIN players p ON p.id=pd.player_id
+    WHERE pd.club_id=? ORDER BY pd.uploaded_at DESC LIMIT 100
+  `).bind(clubId).all();
+  docs = res?.results ?? [];
+} catch {}
+
+const typeLabels: Record<string,string> = {
+  MEDICAL_FORM: 'Aviz medical', LICENSE: 'Legitima\u021bie', GDPR_CONSENT: 'GDPR',
+  PARENT_CONSENT: 'Acord p\u0103rinte', IDENTITY: 'Identitate', CONTRACT: 'Contract', OTHER: 'Altele'
+};
+---
+<AdminLayout title="Documente">
+  <div style="margin-bottom:20px">
+    <h2 style="font-size:20px;font-weight:800">Documente</h2>
+    <p style="color:#6b7280;font-size:13px">Documente \u00eenc\u0103rcate per juc\u0103tor</p>
+  </div>
+
+  <div class="card" style="padding:0;overflow:hidden">
+    {docs.length === 0 ? (
+      <div style="padding:60px 24px;text-align:center;color:#9ca3af">
+        <div style="font-size:40px;margin-bottom:12px">\ud83d\udcc1</div>
+        <p style="font-weight:600">Niciun document \u00eenc\u0103rcat</p>
+      </div>
+    ) : (
+      <table class="table">
+        <thead><tr><th>Juc\u0103tor</th><th>Tip</th><th>Fi\u0219ier</th><th>\u00cenc\u0103rcat</th><th></th></tr></thead>
+        <tbody>
+          {docs.map((d: any) => (
+            <tr>
+              <td style="font-weight:600">{d.first_name} {d.last_name}</td>
+              <td><span class="badge badge-blue">{typeLabels[d.type] || d.type}</span></td>
+              <td style="font-size:13px;color:#6b7280">{d.file_name}</td>
+              <td style="font-size:13px;color:#6b7280">{d.uploaded_at?.slice(0,10)}</td>
+              <td>{d.file_url && <a href={d.file_url} target="_blank" class="btn btn-ghost btn-sm">Deschide</a>}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )}
+  </div>
+</AdminLayout>
