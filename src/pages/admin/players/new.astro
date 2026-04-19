@@ -1,0 +1,162 @@
+---
+export const prerender = false;
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import { getClubSportConfig } from '../../lib/sport-config';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const db = (Astro.locals as any).runtime?.env?.DB;
+const clubId = user.club_id;
+
+const teams = db ? (await db.prepare('SELECT id, name, age_group FROM teams WHERE club_id = ? AND is_active = 1 ORDER BY age_group, name').bind(clubId).all())?.results ?? [] : [];
+const sportConfig = db && clubId ? await getClubSportConfig(db, clubId) : null;
+const positions = sportConfig?.positions ?? [];
+
+const err = Astro.url.searchParams.get('err');
+---
+<AdminLayout title="Jucător nou">
+  <div style="max-width:720px">
+    <a href="/admin/players" style="color:#6b7280;font-size:14px;text-decoration:none;display:inline-flex;align-items:center;gap:6px;margin-bottom:20px">← Înapoi la jucători</a>
+
+    {err === 'date' && <div class="alert alert-error">Completează câmpurile obligatorii (prenume, nume, dată naștere).</div>}
+    {err === 'eroare' && <div class="alert alert-error">Eroare la salvare. Încearcă din nou.</div>}
+
+    <div class="card">
+      <form method="POST" action="/api/admin/players">
+
+        <h3 style="font-size:14px;font-weight:700;margin-bottom:16px;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em">Date personale</h3>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div class="form-group">
+            <label class="form-label">Prenume *</label>
+            <input name="first_name" class="form-input" required placeholder="ex: Ion" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Nume *</label>
+            <input name="last_name" class="form-input" required placeholder="ex: Popescu" />
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div class="form-group">
+            <label class="form-label">Data nașterii *</label>
+            <input name="birth_date" type="date" class="form-input" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Gen</label>
+            <select name="gender" class="form-select">
+              <option value="">— Nespecificat —</option>
+              <option value="M">Masculin</option>
+              <option value="F">Feminin</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div class="form-group">
+            <label class="form-label">Echipă</label>
+            <select name="team_id" class="form-select">
+              <option value="">— Fără echipă —</option>
+              {(teams as any[]).map((t: any) => (
+                <option value={t.id}>{t.name} ({t.age_group})</option>
+              ))}
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Post</label>
+            <select name="position" class="form-select">
+              <option value="">— Nespecificat —</option>
+              {positions.map((p: any) => (
+                <option value={p.code}>{p.name_ro}{p.abbreviation ? ` (${p.abbreviation})` : ''}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div class="form-group">
+            <label class="form-label">Nr. tricou</label>
+            <input name="jersey_number" type="number" class="form-input" placeholder="ex: 10" min="1" max="99" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Status</label>
+            <select name="status" class="form-select">
+              <option value="ACTIVE">Activ</option>
+              <option value="INACTIVE">Inactiv</option>
+              <option value="INJURED">Accidentat</option>
+              <option value="SUSPENDED">Suspendat</option>
+              <option value="TRANSFERRED">Transferat</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div class="form-group">
+            <label class="form-label">Nr. legitimație</label>
+            <input name="license_number" class="form-input" placeholder="ex: FED-2024-1234" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">ID Federație</label>
+            <input name="federation_id" class="form-input" />
+          </div>
+        </div>
+
+        <h3 style="font-size:14px;font-weight:700;margin:24px 0 16px;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em">Contact părinte / tutore</h3>
+
+        <div class="form-group">
+          <label class="form-label">Nume părinte</label>
+          <input name="parent_name" class="form-input" />
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div class="form-group">
+            <label class="form-label">Telefon</label>
+            <input name="parent_phone" type="tel" class="form-input" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Email</label>
+            <input name="parent_email" type="email" class="form-input" />
+          </div>
+        </div>
+
+        <h3 style="font-size:14px;font-weight:700;margin:24px 0 16px;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em">Contact jucător (opțional)</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px">
+          <div class="form-group">
+            <label class="form-label">Email jucător</label>
+            <input name="player_email" type="email" class="form-input" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Telefon jucător</label>
+            <input name="player_phone" class="form-input" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">WhatsApp</label>
+            <input name="player_whatsapp" class="form-input" />
+          </div>
+        </div>
+
+        <h3 style="font-size:14px;font-weight:700;margin:24px 0 16px;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em">Contact urgență</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div class="form-group">
+            <label class="form-label">Persoană urgență</label>
+            <input name="emergency_contact" class="form-input" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Telefon urgență</label>
+            <input name="emergency_phone" type="tel" class="form-input" />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Observații</label>
+          <textarea name="notes" class="form-textarea" rows="2"></textarea>
+        </div>
+
+        <div style="display:flex;gap:12px;justify-content:flex-end">
+          <a href="/admin/players" class="btn btn-ghost">Anulează</a>
+          <button type="submit" class="btn btn-primary">Salvează jucătorul</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</AdminLayout>

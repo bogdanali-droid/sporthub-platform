@@ -1,0 +1,93 @@
+---
+export const prerender = false;
+import AdminLayout from '../../../layouts/AdminLayout.astro';
+
+const user = (Astro.locals as any).user;
+if (!user) return Astro.redirect('/login');
+if (user.role !== 'SUPERADMIN') return Astro.redirect('/admin');
+
+const db = (Astro.locals as any).runtime?.env?.DB;
+const msg = Astro.url.searchParams.get('msg');
+const err = Astro.url.searchParams.get('err');
+
+let federations: any[] = [];
+try {
+  const res = await db?.prepare('SELECT f.*, (SELECT COUNT(*) FROM sports s WHERE s.code = f.sport_code) as has_sport FROM federations f ORDER BY f.name').all();
+  federations = res?.results ?? [];
+} catch {}
+
+let sports: any[] = [];
+try {
+  const res = await db?.prepare('SELECT code, name_ro, icon FROM sports WHERE is_active = 1 ORDER BY display_order').all();
+  sports = res?.results ?? [];
+} catch {}
+---
+<AdminLayout title="Federații">
+  {msg === 'creat' && <div class="alert alert-success" style="margin-bottom:16px">Federația a fost creată.</div>}
+  {err === 'name' && <div class="alert alert-error" style="margin-bottom:16px">Numele federației e obligatoriu.</div>}
+
+  <div style="margin-bottom:20px">
+    <h2 style="font-size:20px;font-weight:800;margin-bottom:4px">Federații</h2>
+    <p style="color:#6b7280;font-size:13px">Federații naționale per sport — FRBS, FRR, FRF etc.</p>
+  </div>
+
+  <div class="card" style="padding:0;overflow:hidden;margin-bottom:24px">
+    {federations.length === 0 ? (
+      <div style="padding:40px 24px;text-align:center;color:#9ca3af"><p>Nicio federație înregistrată.</p></div>
+    ) : (
+      <table class="table">
+        <thead><tr><th>Nume</th><th>Acronim</th><th>Sport</th><th>Țară</th><th>Website</th><th>Status</th></tr></thead>
+        <tbody>
+          {federations.map((f: any) => (
+            <tr>
+              <td style="font-weight:700">{f.name}</td>
+              <td><span class="badge badge-blue">{f.acronym || '—'}</span></td>
+              <td style="color:#6b7280">{f.sport_code || '—'}</td>
+              <td>{f.country || 'RO'}</td>
+              <td>{f.website ? <a href={f.website} target="_blank" rel="noopener" style="color:#3b82f6">{f.website}</a> : '—'}</td>
+              <td>{f.is_active ? <span class="badge badge-green">Activ</span> : <span class="badge badge-red">Inactiv</span>}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )}
+  </div>
+
+  <div class="card" style="max-width:560px">
+    <h3 style="font-size:15px;font-weight:700;margin-bottom:16px">+ Federație nouă</h3>
+    <form method="POST" action="/api/superadmin/federations">
+      <div class="form-group">
+        <label class="form-label">Sport *</label>
+        <select name="sport_code" class="form-select" required>
+          <option value="">-- alege sportul --</option>
+          {sports.map((s: any) => (
+            <option value={s.code}>{s.icon} {s.name_ro}</option>
+          ))}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Nume *</label>
+        <input type="text" name="name" class="form-input" required placeholder="Federația Română de Baseball și Softball" />
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div class="form-group">
+          <label class="form-label">Acronim</label>
+          <input type="text" name="acronym" class="form-input" placeholder="FRBS" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Țara</label>
+          <input type="text" name="country" class="form-input" value="RO" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Website</label>
+        <input type="url" name="website" class="form-input" placeholder="https://" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Email</label>
+        <input type="email" name="email" class="form-input" placeholder="contact@" />
+      </div>
+      <button type="submit" class="btn btn-primary">Creează</button>
+    </form>
+  </div>
+</AdminLayout>
