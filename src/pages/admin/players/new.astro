@@ -1,7 +1,7 @@
 ---
 export const prerender = false;
-import AdminLayout from '../../layouts/AdminLayout.astro';
-import { getClubSportConfig } from '../../lib/sport-config';
+import AdminLayout from '../../../layouts/AdminLayout.astro';
+import { getClubSportConfig } from '../../../lib/sport-config';
 
 const user = Astro.locals.user;
 if (!user) return Astro.redirect('/login');
@@ -103,7 +103,6 @@ const err = Astro.url.searchParams.get('err');
         </div>
 
         <h3 style="font-size:14px;font-weight:700;margin:24px 0 16px;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em">Contact părinte / tutore</h3>
-
         <div class="form-group">
           <label class="form-label">Nume părinte</label>
           <input name="parent_name" class="form-input" />
