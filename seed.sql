@@ -41,54 +41,57 @@ INSERT OR IGNORE INTO sport_drill_categories (sport_code, code, name_ro, display
   ('RUGBY','INCALZIRE','Incalzire',6), ('RUGBY','TEHNICA','Tehnica',7);
 
 -- ============================================================
--- BASEBALL5 — configurare completa (WBSC 2025)
--- Sursa: wbsc.org/disciplines/baseball5, regulament oficial WBSC Baseball5
+-- BASEBALL5 — configurare completa (WBSC Rulebook RO 2020)
+-- Sursa: Baseball5_Rulebook_RO_03032020_v1.pdf
+-- 5 jucatori/echipa, 5 innings, fara pitcher
+-- Pozitii defensiv: Baza 1, Baza 2, Baza 3, ShortStop, MidFielder
+-- NU exista Walk sau Strikeout (fara pitcher)
 -- ============================================================
 INSERT OR IGNORE INTO sport_age_groups (sport_code, code, name, min_age, max_age) VALUES
   ('BASEBALL5','U10','U10',8,10), ('BASEBALL5','U12','U12',11,12),
   ('BASEBALL5','U15','U15',13,15), ('BASEBALL5','U18','U18',16,18),
   ('BASEBALL5','OPEN','Open',18,99);
 
--- Pozitii de teren (5 jucatori defensivi conform WBSC)
--- Nu exista pozitie dedicata de batter — toti jucatorii bateaza pe rand
+-- Pozitii defensiv confirmate din regulamentul oficial WBSC (pag. 9)
 INSERT OR IGNORE INTO sport_positions (sport_code, code, name_ro, abbreviation, display_order) VALUES
-  ('BASEBALL5','MIDFIELDER','Mijlocas','M',1),
-  ('BASEBALL5','FIRST_BASE','Prima baza','1B',2),
-  ('BASEBALL5','SECOND_BASE','A doua baza','2B',3),
-  ('BASEBALL5','THIRD_BASE','A treia baza','3B',4),
-  ('BASEBALL5','SHORTSTOP','ScurtStop','SS',5);
+  ('BASEBALL5','MIDFIELDER','Mijlocas (MidFielder)','M',1),
+  ('BASEBALL5','FIRST_BASE','Baza 1 (First Base)','1B',2),
+  ('BASEBALL5','SECOND_BASE','Baza 2 (Second Base)','2B',3),
+  ('BASEBALL5','THIRD_BASE','Baza 3 (Third Base)','3B',4),
+  ('BASEBALL5','SHORTSTOP','ScurtStop (ShortStop)','SS',5);
 
+-- Evenimente de joc (fara WALK/STRIKEOUT - nu exista pitcher in B5)
 INSERT OR IGNORE INTO sport_event_types (sport_code, code, name_ro, default_points, is_discipline, display_order) VALUES
-  ('BASEBALL5','SINGLE','Single (baza 1)',0,0,1),
-  ('BASEBALL5','DOUBLE','Double (baza 2)',0,0,2),
-  ('BASEBALL5','TRIPLE','Triple (baza 3)',0,0,3),
-  ('BASEBALL5','HOME_RUN','Home Run',1,0,4),
-  ('BASEBALL5','RUN','Run (punct marcat)',1,0,5),
-  ('BASEBALL5','OUT','Out',0,0,6),
-  ('BASEBALL5','CAUGHT_OUT','Prinsä în zbor (out)',0,0,7),
-  ('BASEBALL5','FORCE_OUT','Out fortat la bazä',0,0,8),
-  ('BASEBALL5','TAG_OUT','Out prin atingere',0,0,9),
-  ('BASEBALL5','WALK','Walk (bazä liberä)',0,0,10),
-  ('BASEBALL5','ERROR','Eroare teren',0,0,11);
+  ('BASEBALL5','SINGLE','Single (ajunge la Baza 1)',0,0,1),
+  ('BASEBALL5','DOUBLE','Double (ajunge la Baza 2)',0,0,2),
+  ('BASEBALL5','TRIPLE','Triple (ajunge la Baza 3)',0,0,3),
+  ('BASEBALL5','HOME_RUN','Home Run (circuit complet)',1,0,4),
+  ('BASEBALL5','RUN','Punct (Run marcat)',1,0,5),
+  ('BASEBALL5','CAUGHT_OUT','Out - prins in zbor (Fly Out)',0,0,6),
+  ('BASEBALL5','FORCE_OUT','Out - fortat la baza',0,0,7),
+  ('BASEBALL5','TAG_OUT','Out - prin atingere (Tag Out)',0,0,8),
+  ('BASEBALL5','OUT','Out - ratat mingea',0,0,9),
+  ('BASEBALL5','ERROR','Eroare teren',0,0,10);
 
 INSERT OR IGNORE INTO sport_evaluation_attributes (sport_code, code, name_ro, category, display_order) VALUES
-  ('BASEBALL5','BATTING','Batting (lovire)','TECHNICAL',1),
+  ('BASEBALL5','BATTING','Batting (lovire cu pumnul/palma)','TECHNICAL',1),
   ('BASEBALL5','FIELDING','Fielding (prindere/aruncare)','TECHNICAL',2),
   ('BASEBALL5','SPEED','Viteza pe baze','PHYSICAL',3),
   ('BASEBALL5','STRATEGY','Intelegere tactica','TACTICAL',4),
-  ('BASEBALL5','ATTITUDE','Atitudine','MENTAL',5);
+  ('BASEBALL5','ATTITUDE','Atitudine si lucru in echipa','MENTAL',5);
 
 INSERT OR IGNORE INTO sport_drill_categories (sport_code, code, name_ro, display_order) VALUES
   ('BASEBALL5','BATTING_DRILL','Lovire (Batting)',1),
-  ('BASEBALL5','FIELDING_DRILL','Prindere si aruncare',2),
+  ('BASEBALL5','FIELDING_DRILL','Prindere si aruncare (Fielding)',2),
   ('BASEBALL5','BASE_RUNNING','Alergare pe baze',3),
   ('BASEBALL5','TACTICS','Tactica de joc',4),
   ('BASEBALL5','FITNESS','Conditie fizica',5),
   ('BASEBALL5','WARMUP','Incalzire',6);
 
 -- ============================================================
--- SOFTBALL — configurare completa (WBSC / FRBS)
+-- SOFTBALL — configurare completa (WBSC Fast-Pitch Rules)
 -- Categorii varsta conform structurii competitionale FRBS
+-- 9 jucatori/echipa, 7 innings, cu pitcher
 -- ============================================================
 INSERT OR IGNORE INTO sport_age_groups (sport_code, code, name, min_age, max_age) VALUES
   ('SOFTBALL','U12','U12',10,12), ('SOFTBALL','U14','U14',13,14),
@@ -108,24 +111,26 @@ INSERT OR IGNORE INTO sport_positions (sport_code, code, name_ro, abbreviation, 
   ('SOFTBALL','RIGHT_FIELD','Dreapta (Right Field)','RF',9);
 
 INSERT OR IGNORE INTO sport_event_types (sport_code, code, name_ro, default_points, is_discipline, display_order) VALUES
-  ('SOFTBALL','SINGLE','Single',0,0,1),
-  ('SOFTBALL','DOUBLE','Double',0,0,2),
-  ('SOFTBALL','TRIPLE','Triple',0,0,3),
+  ('SOFTBALL','SINGLE','Single (baza 1)',0,0,1),
+  ('SOFTBALL','DOUBLE','Double (baza 2)',0,0,2),
+  ('SOFTBALL','TRIPLE','Triple (baza 3)',0,0,3),
   ('SOFTBALL','HOME_RUN','Home Run',1,0,4),
-  ('SOFTBALL','RUN','Run (punct)',1,0,5),
+  ('SOFTBALL','RUN','Run (punct marcat)',1,0,5),
   ('SOFTBALL','RBI','RBI (bataie decisiva)',0,0,6),
-  ('SOFTBALL','OUT','Out',0,0,7),
-  ('SOFTBALL','STRIKEOUT','Strikeout',0,0,8),
-  ('SOFTBALL','WALK','Walk',0,0,9),
-  ('SOFTBALL','STOLEN_BASE','Baza furata',0,0,10),
-  ('SOFTBALL','ERROR','Eroare',0,0,11);
+  ('SOFTBALL','STRIKEOUT','Strikeout (3 strike-uri)',0,0,7),
+  ('SOFTBALL','WALK','Walk (4 mingi - baza libera)',0,0,8),
+  ('SOFTBALL','STOLEN_BASE','Baza furata',0,0,9),
+  ('SOFTBALL','CAUGHT_OUT','Out - prins in zbor',0,0,10),
+  ('SOFTBALL','FORCE_OUT','Out - fortat la baza',0,0,11),
+  ('SOFTBALL','TAG_OUT','Out - prin atingere',0,0,12),
+  ('SOFTBALL','ERROR','Eroare teren',0,0,13);
 
 INSERT OR IGNORE INTO sport_evaluation_attributes (sport_code, code, name_ro, category, display_order) VALUES
-  ('SOFTBALL','BATTING','Batting','TECHNICAL',1),
-  ('SOFTBALL','PITCHING','Pitching','TECHNICAL',2),
-  ('SOFTBALL','FIELDING','Fielding','TECHNICAL',3),
-  ('SOFTBALL','THROWING','Aruncare','TECHNICAL',4),
-  ('SOFTBALL','SPEED','Viteza','PHYSICAL',5),
+  ('SOFTBALL','BATTING','Batting (lovire)','TECHNICAL',1),
+  ('SOFTBALL','PITCHING','Pitching (aruncare)','TECHNICAL',2),
+  ('SOFTBALL','FIELDING','Fielding (prindere/aruncare camp)','TECHNICAL',3),
+  ('SOFTBALL','THROWING','Aruncare (precizie/putere)','TECHNICAL',4),
+  ('SOFTBALL','SPEED','Viteza pe baze','PHYSICAL',5),
   ('SOFTBALL','STRENGTH','Forta','PHYSICAL',6),
   ('SOFTBALL','STRATEGY','Tactica','TACTICAL',7),
   ('SOFTBALL','GAME_IQ','Intelegere situatii de joc','TACTICAL',8),
@@ -135,7 +140,7 @@ INSERT OR IGNORE INTO sport_evaluation_attributes (sport_code, code, name_ro, ca
 INSERT OR IGNORE INTO sport_drill_categories (sport_code, code, name_ro, display_order) VALUES
   ('SOFTBALL','PITCHING_DRILL','Antrenament aruncare (Pitching)',1),
   ('SOFTBALL','BATTING_DRILL','Lovire (Batting)',2),
-  ('SOFTBALL','FIELDING_DRILL','Prindere si aruncare',3),
+  ('SOFTBALL','FIELDING_DRILL','Prindere si aruncare (Fielding)',3),
   ('SOFTBALL','BASE_RUNNING','Alergare pe baze',4),
   ('SOFTBALL','CATCHING_DRILL','Antrenament receptor (Catching)',5),
   ('SOFTBALL','TACTICS','Tactica de joc',6),
