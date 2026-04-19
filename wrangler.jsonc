@@ -1,0 +1,43 @@
+{
+  "name": "sporthub-platform",
+  "compatibility_date": "2024-09-23",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "dist/_worker.js/index.js",
+  "workers_dev": false,
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "sporthub-db",
+      "database_id": "REPLACE_WITH_WRANGLER_CREATED_ID"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "SESSION_KV",
+      "id": "REPLACE_WITH_WRANGLER_CREATED_ID",
+      "preview_id": "REPLACE_WITH_WRANGLER_CREATED_ID"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "R2",
+      "bucket_name": "sporthub-media",
+      "preview_bucket_name": "sporthub-media"
+    }
+  ],
+  "triggers": {
+    "crons": [
+      "0 * * * *",
+      "0 6 1 * *"
+    ]
+  },
+  "vars": {
+    "ENVIRONMENT": "production",
+    "APP_URL": "https://sporthub.ro",
+    "CRON_SECRET": "change-me-in-cloudflare-dashboard"
+  }
+}
