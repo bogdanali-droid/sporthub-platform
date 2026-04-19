@@ -1,0 +1,188 @@
+---
+import AdminLayout from '@/layouts/AdminLayout.astro';
+if (!Astro.locals.user) return Astro.redirect('/login');
+const user = Astro.locals.user;
+const env  = (Astro.locals as any).runtime?.env;
+import { queryAll } from '@/lib/db';
+import { getClubSportConfig } from '@/lib/sport-config';
+
+const [sport, teams, coaches] = await Promise.all([
+  getClubSportConfig(env.DB, user.club_id!),
+  queryAll<any>(env.DB,
+    `SELECT t.*, u.first_name||' '||u.last_name AS coach_name,
+            COUNT(tp.player_id) AS player_count
+     FROM teams t
+     LEFT JOIN users u ON u.id = t.coach_id
+     LEFT JOIN team_players tp ON tp.team_id = t.id AND tp.left_at IS NULL
+     WHERE t.club_id = ? GROUP BY t.id ORDER BY t.name`,
+    [user.club_id]),
+  queryAll<any>(env.DB,
+    `SELECT id, first_name, last_name FROM users WHERE club_id=? AND role='COACH' AND is_active=1`,
+    [user.club_id]),
+]);
+---
+
+<AdminLayout title="Echipe" user={user} sportCode={sport?.code} sportIcon={sport?.icon}>
+
+  <div class="toolbar">
+    <h2 style="font-size:15px;color:#64748b">{teams.length} echipe</h2>
+    <button class="btn-primary" onclick="openModal()">+ Echipă nouă</button>
+  </div>
+
+  <div class="cards-grid" id="teams-grid">
+    {teams.map(t => (
+      <div class="team-card">
+        <div class="team-color" style={`background:${t.jersey_color_primary ?? '#0f4c81'}`}></div>
+        <div class="team-body">
+          <div class="team-name">{t.name}</div>
+          <div class="team-meta">{t.age_group} • {t.season ?? '2025/26'}</div>
+          <div class="team-stats">
+            <span>👥 {t.player_count} jucători</span>
+            {t.coach_name && <span>🏋️ {t.coach_name}</span>}
+          </div>
+          <div class="team-badge" data-active={t.is_active}>
+            {t.is_active ? '✅ Activă' : '❌ Inactivă'}
+          </div>
+        </div>
+        <div class="team-actions">
+          <button class="btn-icon" onclick={`editTeam('${t.id}')`}>✏️</button>
+          <button class="btn-icon" onclick={`deleteTeam('${t.id}','${t.name}')`}>🗑️</button>
+        </div>
+      </div>
+    ))}
+  </div>
+
+  <!-- MODAL -->
+  <div id="modal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-head">
+        <h2 id="modal-title">Echipă nouă</h2>
+        <button onclick="closeModal()" class="btn-close">×</button>
+      </div>
+      <form id="team-form" class="modal-body">
+        <input type="hidden" id="team-id" />
+        <div class="form-group">
+          <label>Nume echipă *</label>
+          <input id="f-name" required placeholder="ex: Steaua U12" />
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Categorie vârstă *</label>
+            <select id="f-age-group" required>
+              <option value="">Selectează</option>
+              {sport?.ageGroups.map(ag => (
+                <option value={ag.code}>{ag.name}</option>
+              ))}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Sezon</label>
+            <input id="f-season" placeholder="2025/26" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Antrenor</label>
+            <select id="f-coach">
+              <option value="">Fără antrenor</option>
+              {coaches.map(c => (
+                <option value={c.id}>{c.first_name} {c.last_name}</option>
+              ))}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Culoare tricou</label>
+            <input id="f-color" type="color" value="#0f4c81" style="height:40px;padding:2px 4px" />
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" onclick="closeModal()" class="btn-secondary">Anulează</button>
+          <button type="submit" class="btn-primary">Salvează</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</AdminLayout>
+
+<style>
+  .toolbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; }
+  .cards-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:16px; }
+  .team-card { background:#fff; border-radius:12px; overflow:hidden; box-shadow:0 1px 4px rgba(0,0,0,.07); display:flex; flex-direction:column; }
+  .team-color { height:6px; }
+  .team-body { padding:16px; flex:1; }
+  .team-name { font-size:16px; font-weight:700; color:#1e293b; margin-bottom:4px; }
+  .team-meta { font-size:12px; color:#64748b; margin-bottom:10px; }
+  .team-stats { display:flex; gap:12px; font-size:12px; color:#475569; margin-bottom:10px; }
+  .team-badge { font-size:12px; font-weight:500; }
+  .team-actions { display:flex; gap:6px; padding:10px 16px; border-top:1px solid #f1f5f9; }
+  .btn-icon { background:none; border:none; cursor:pointer; font-size:16px; padding:4px 6px; border-radius:6px; }
+  .btn-icon:hover { background:#f1f5f9; }
+  .btn-primary { background:#0f4c81; color:#fff; border:none; padding:9px 18px; border-radius:8px; cursor:pointer; font-size:14px; font-weight:600; font-family:inherit; }
+  .btn-primary:hover { background:#1565c0; }
+  .btn-secondary { background:#f1f5f9; color:#374151; border:none; padding:9px 18px; border-radius:8px; cursor:pointer; font-size:14px; font-weight:600; font-family:inherit; }
+  .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:200; display:flex; align-items:center; justify-content:center; padding:16px; }
+  .modal-overlay.hidden { display:none; }
+  .modal { background:#fff; border-radius:16px; width:100%; max-width:480px; }
+  .modal-head { display:flex; justify-content:space-between; align-items:center; padding:20px 24px; border-bottom:1px solid #f1f5f9; }
+  .modal-head h2 { font-size:18px; color:#1e293b; }
+  .btn-close { background:none; border:none; font-size:22px; cursor:pointer; color:#64748b; }
+  .modal-body { padding:24px; }
+  .form-row { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .form-group { margin-bottom:16px; }
+  .form-group label { display:block; font-size:13px; font-weight:500; color:#374151; margin-bottom:6px; }
+  .form-group input, .form-group select { width:100%; padding:9px 12px; border:1px solid #d1d5db; border-radius:8px; font-size:14px; font-family:inherit; }
+  .modal-footer { display:flex; justify-content:flex-end; gap:10px; padding-top:8px; }
+</style>
+
+<script>
+  let editingId: string | null = null;
+
+  function openModal() {
+    editingId = null;
+    (document.getElementById('modal-title') as HTMLElement).textContent = 'Echipă nouă';
+    (document.getElementById('team-form') as HTMLFormElement).reset();
+    (document.getElementById('modal') as HTMLElement).classList.remove('hidden');
+  }
+  function closeModal() {
+    (document.getElementById('modal') as HTMLElement).classList.add('hidden');
+  }
+
+  async function editTeam(id: string) {
+    const res = await fetch(`/api/admin/teams/${id}`);
+    if (!res.ok) return;
+    const t = await res.json();
+    editingId = id;
+    (document.getElementById('modal-title') as HTMLElement).textContent = 'Editează echipă';
+    (document.getElementById('f-name') as HTMLInputElement).value = t.name ?? '';
+    (document.getElementById('f-age-group') as HTMLSelectElement).value = t.age_group ?? '';
+    (document.getElementById('f-season') as HTMLInputElement).value = t.season ?? '';
+    (document.getElementById('f-coach') as HTMLSelectElement).value = t.coach_id ?? '';
+    (document.getElementById('f-color') as HTMLInputElement).value = t.jersey_color_primary ?? '#0f4c81';
+    (document.getElementById('modal') as HTMLElement).classList.remove('hidden');
+  }
+
+  async function deleteTeam(id: string, name: string) {
+    if (!confirm(`Ștergi echipa ${name}?`)) return;
+    const res = await fetch(`/api/admin/teams/${id}`, { method: 'DELETE' });
+    if (res.ok) location.reload();
+  }
+
+  document.getElementById('team-form')?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const body = {
+      name:                 (document.getElementById('f-name') as HTMLInputElement).value,
+      age_group:            (document.getElementById('f-age-group') as HTMLSelectElement).value,
+      season:               (document.getElementById('f-season') as HTMLInputElement).value,
+      coach_id:             (document.getElementById('f-coach') as HTMLSelectElement).value || null,
+      jersey_color_primary: (document.getElementById('f-color') as HTMLInputElement).value,
+    };
+    const url = editingId ? `/api/admin/teams/${editingId}` : '/api/admin/teams';
+    const res = await fetch(url, {
+      method: editingId ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) { closeModal(); location.reload(); }
+    else { const err = await res.json(); alert(err.error ?? 'Eroare.'); }
+  });
+</script>
