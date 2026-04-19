@@ -12,14 +12,14 @@
     {
       "binding": "DB",
       "database_name": "sporthub-db",
-      "database_id": "REPLACE_WITH_WRANGLER_CREATED_ID"
+      "database_id": "0dd122a2-2d6c-49a6-88c4-20a8b3c47513"
     }
   ],
   "kv_namespaces": [
     {
       "binding": "SESSION_KV",
-      "id": "REPLACE_WITH_WRANGLER_CREATED_ID",
-      "preview_id": "REPLACE_WITH_WRANGLER_CREATED_ID"
+      "id": "REPLACE_WITH_KV_ID",
+      "preview_id": "REPLACE_WITH_KV_ID"
     }
   ],
   "r2_buckets": [
@@ -37,7 +37,7 @@
   },
   "vars": {
     "ENVIRONMENT": "production",
-    "APP_URL": "https://sporthub.ro",
+    "APP_URL": "https://sporthub.pages.dev",
     "CRON_SECRET": "change-me-in-cloudflare-dashboard"
   }
 }
