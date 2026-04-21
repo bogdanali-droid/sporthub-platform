@@ -1,0 +1,91 @@
+---
+import ParentLayout from '@/layouts/ParentLayout.astro';
+import { queryFirst, queryAll } from '@/lib/db';
+
+if (!Astro.locals.user) return Astro.redirect('/login');
+const user = Astro.locals.user;
+if (!['PARENT', 'SUPERADMIN'].includes(user.role)) return Astro.redirect('/login');
+
+const db = (Astro.locals as any).runtime?.env?.DB;
+
+const child = await queryFirst<any>(db, 'SELECT * FROM players WHERE parent_user_id=?', [user.id]);
+
+let records: any[] = [];
+let latestRecord: any = null;
+
+if (child) {
+  records = await queryAll<any>(db,
+    `SELECT * FROM medical_records WHERE player_id=? ORDER BY visit_date DESC`,
+    [child.id]
+  );
+  latestRecord = records[0] ?? null;
+}
+
+const childName = child ? `${child.first_name} ${child.last_name}` : undefined;
+---
+
+<ParentLayout title="Medical" user={user} childName={childName}>
+  {!child ? (
+    <div class="card" style="text-align:center;padding:48px 24px">
+      <div style="font-size:48px;margin-bottom:16px">⚠️</div>
+      <h2 style="color:#1e293b;margin-bottom:8px">Cont neconectat la un profil de jucător</h2>
+      <p style="color:#64748b">Contactează administratorul clubului pentru a-ți lega contul de profilul copilului.</p>
+    </div>
+  ) : (
+    <div>
+      {latestRecord && !latestRecord.is_fit && (
+        <div class="alert alert-error" style="margin-bottom:20px">
+          ⚠️ <strong>{child.first_name}</strong> este marcat <strong>INAPT</strong> de la ultima vizită medicală
+          ({latestRecord.visit_date}). Vă rugăm să contactați medicul sau antrenorul.
+        </div>
+      )}
+
+      {latestRecord && latestRecord.is_fit && (
+        <div class="alert alert-info" style="margin-bottom:20px">
+          ✅ <strong>{child.first_name}</strong> este apt medical conform ultimei vizite ({latestRecord.visit_date}).
+        </div>
+      )}
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Fișe medicale — {child.first_name} {child.last_name}</span>
+          {latestRecord && (
+            <span class={`badge ${latestRecord.is_fit ? 'badge-green' : 'badge-red'}`}>
+              {latestRecord.is_fit ? 'APT' : 'INAPT'}
+            </span>
+          )}
+        </div>
+        {records.length === 0 ? (
+          <p style="color:#94a3b8;font-size:14px">Nicio fișă medicală înregistrată.</p>
+        ) : (
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Data vizitei</th>
+                <th>Medic</th>
+                <th>Diagnostic</th>
+                <th>Apt</th>
+                <th>Urmărire</th>
+              </tr>
+            </thead>
+            <tbody>
+              {records.map(r => (
+                <tr>
+                  <td>{r.visit_date}</td>
+                  <td>{r.doctor_name ?? '—'}</td>
+                  <td>{r.diagnosis ?? '—'}</td>
+                  <td>
+                    <span class={`badge ${r.is_fit ? 'badge-green' : 'badge-red'}`}>
+                      {r.is_fit ? 'APT' : 'INAPT'}
+                    </span>
+                  </td>
+                  <td>{r.next_visit_date ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  )}
+</ParentLayout>

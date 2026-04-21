@@ -1,0 +1,87 @@
+---
+import PlayerLayout from '@/layouts/PlayerLayout.astro';
+import { queryFirst, queryAll } from '@/lib/db';
+
+if (!Astro.locals.user) return Astro.redirect('/login');
+const user = Astro.locals.user;
+if (!['PLAYER', 'SUPERADMIN'].includes(user.role)) return Astro.redirect('/login');
+
+const db = (Astro.locals as any).runtime?.env?.DB;
+
+const player = await queryFirst<any>(db, 'SELECT * FROM players WHERE user_id=?', [user.id]);
+
+let records: any[] = [];
+let latestRecord: any = null;
+
+if (player) {
+  records = await queryAll<any>(db,
+    `SELECT * FROM medical_records WHERE player_id=? ORDER BY visit_date DESC`,
+    [player.id]
+  );
+  latestRecord = records[0] ?? null;
+}
+---
+
+<PlayerLayout title="Medical" user={user}>
+  {!player ? (
+    <div class="card" style="text-align:center;padding:48px 24px">
+      <div style="font-size:48px;margin-bottom:16px">⚠️</div>
+      <h2 style="color:#1e293b;margin-bottom:8px">Cont neconectat la un profil de jucător</h2>
+      <p style="color:#64748b">Contactează administratorul clubului pentru a-ți lega contul de un profil de jucător.</p>
+    </div>
+  ) : (
+    <div>
+      {latestRecord && (
+        <div class={`alert ${latestRecord.is_fit ? 'alert-info' : 'alert-warning'}`} style="margin-bottom:20px">
+          {latestRecord.is_fit
+            ? `✅ Status actual: APT — ultima vizită ${latestRecord.visit_date}`
+            : `⚠️ Status actual: INAPT — ultima vizită ${latestRecord.visit_date}. Contactează medicul.`
+          }
+        </div>
+      )}
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Fișe medicale</span>
+          {latestRecord && (
+            <span class={`badge ${latestRecord.is_fit ? 'badge-green' : 'badge-red'}`}>
+              {latestRecord.is_fit ? 'APT' : 'INAPT'}
+            </span>
+          )}
+        </div>
+        {records.length === 0 ? (
+          <p style="color:#94a3b8;font-size:14px">Nicio fișă medicală înregistrată.</p>
+        ) : (
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Data vizitei</th>
+                <th>Medic</th>
+                <th>Diagnostic</th>
+                <th>Tratament</th>
+                <th>Apt</th>
+                <th>Urmărire</th>
+              </tr>
+            </thead>
+            <tbody>
+              {records.map(r => (
+                <tr>
+                  <td>{r.visit_date}</td>
+                  <td>{r.doctor_name ?? '—'}</td>
+                  <td>{r.diagnosis ?? '—'}</td>
+                  <td>{r.treatment ?? '—'}</td>
+                  <td>
+                    <span class={`badge ${r.is_fit ? 'badge-green' : 'badge-red'}`}>
+                      {r.is_fit ? 'APT' : 'INAPT'}
+                    </span>
+                  </td>
+                  <td>{r.next_visit_date ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  )}
+</PlayerLayout>

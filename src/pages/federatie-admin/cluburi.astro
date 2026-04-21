@@ -1,0 +1,80 @@
+---
+import FederatieLayout from '@/layouts/FederatieLayout.astro';
+if (!Astro.locals.user) return Astro.redirect('/login/federatie');
+const user = Astro.locals.user;
+if (!['FEDERATION_ADMIN','SUPERADMIN'].includes(user.role)) return Astro.redirect('/login/federatie');
+const db = (Astro.locals as any).runtime?.env?.DB;
+import { queryAll } from '@/lib/db';
+
+const filterSport = Astro.url.searchParams.get('sport') ?? '';
+
+let where = 'WHERE 1=1';
+const params: any[] = [];
+if (filterSport) { where += ' AND c.sport_code = ?'; params.push(filterSport); }
+
+const cluburi = await queryAll<any>(db,
+  `SELECT c.id, c.name, c.sport_code, c.contact_email,
+          a.name AS assoc_name,
+          COUNT(DISTINCT p.id) AS player_count,
+          COUNT(DISTINCT pl.id) AS legitimat_count
+   FROM clubs c
+   LEFT JOIN associations a ON a.id = c.association_id
+   LEFT JOIN players p ON p.club_id = c.id
+   LEFT JOIN player_legitimations pl ON pl.club_id = c.id AND pl.status = 'ACTIVE'
+   ${where}
+   GROUP BY c.id
+   ORDER BY c.name`, params);
+---
+
+<FederatieLayout title="Cluburi" user={user} section="CCLTC">
+
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+    <div>
+      <h1 style="font-size:20px;font-weight:700;color:#1e293b">Registru Cluburi</h1>
+      <p style="font-size:13px;color:#64748b">Toate cluburile afiliate federației</p>
+    </div>
+    <span class="badge badge-gray" style="font-size:13px;padding:6px 12px">{cluburi.length} cluburi</span>
+  </div>
+
+  <form method="GET" style="display:flex;gap:10px;margin-bottom:16px">
+    <select name="sport" class="form-select" style="width:160px" onchange="this.form.submit()">
+      <option value="">Toate sporturile</option>
+      <option value="BASEBALL5" selected={filterSport==='BASEBALL5'}>Baseball5</option>
+      <option value="SOFTBALL" selected={filterSport==='SOFTBALL'}>Softball</option>
+    </select>
+  </form>
+
+  <div class="card">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Club</th><th>Sport</th><th>Asociație</th><th>Contact</th>
+          <th style="text-align:center">Jucători</th><th style="text-align:center">Legitimați activi</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {cluburi.length === 0 && (
+          <tr><td colspan="7" style="text-align:center;color:#64748b;padding:24px">Nu există cluburi înregistrate.</td></tr>
+        )}
+        {cluburi.map((c: any) => (
+          <tr>
+            <td style="font-weight:500;color:#1e293b">{c.name}</td>
+            <td><span class="badge badge-blue">{c.sport_code}</span></td>
+            <td style="font-size:13px;color:#475569">{c.assoc_name ?? <em style="color:#94a3b8">—</em>}</td>
+            <td style="font-size:12px;color:#64748b">{c.contact_email ?? <em style="color:#94a3b8">—</em>}</td>
+            <td style="text-align:center;font-weight:600">{c.player_count}</td>
+            <td style="text-align:center">
+              <span class={`badge ${c.legitimat_count > 0 ? 'badge-green' : 'badge-gray'}`}>
+                {c.legitimat_count}
+              </span>
+            </td>
+            <td>
+              <a href={`/federatie-admin/cluburi/${c.id}`} class="btn btn-outline btn-sm">Detalii</a>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+
+</FederatieLayout>

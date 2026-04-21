@@ -1,0 +1,118 @@
+---
+import ParentLayout from '@/layouts/ParentLayout.astro';
+import { queryFirst, queryAll } from '@/lib/db';
+
+if (!Astro.locals.user) return Astro.redirect('/login');
+const user = Astro.locals.user;
+if (!['PARENT', 'SUPERADMIN'].includes(user.role)) return Astro.redirect('/login');
+
+const db = (Astro.locals as any).runtime?.env?.DB;
+
+const child = await queryFirst<any>(db, 'SELECT * FROM players WHERE parent_user_id=?', [user.id]);
+
+let payments: any[] = [];
+let totalRestant = 0;
+let totalPlatit = 0;
+let currency = 'RON';
+
+if (child) {
+  payments = await queryAll<any>(db,
+    `SELECT * FROM payments WHERE player_id=? ORDER BY due_date DESC LIMIT 40`,
+    [child.id]
+  );
+
+  for (const p of payments) {
+    if (p.status === 'PAID') {
+      totalPlatit += Number(p.amount ?? 0);
+    } else if (p.status === 'PENDING' || p.status === 'OVERDUE') {
+      totalRestant += Number(p.amount ?? 0);
+    }
+    if (p.currency) currency = p.currency;
+  }
+}
+
+const childName = child ? `${child.first_name} ${child.last_name}` : undefined;
+
+const statusBadge: Record<string, string> = {
+  PAID: 'badge-green',
+  PENDING: 'badge-yellow',
+  OVERDUE: 'badge-red',
+};
+const statusLabel: Record<string, string> = {
+  PAID: 'Plătit',
+  PENDING: 'În așteptare',
+  OVERDUE: 'Restant',
+};
+---
+
+<ParentLayout title="Plăți" user={user} childName={childName}>
+  {!child ? (
+    <div class="card" style="text-align:center;padding:48px 24px">
+      <div style="font-size:48px;margin-bottom:16px">⚠️</div>
+      <h2 style="color:#1e293b;margin-bottom:8px">Cont neconectat la un profil de jucător</h2>
+      <p style="color:#64748b">Contactează administratorul clubului pentru a-ți lega contul de profilul copilului.</p>
+    </div>
+  ) : (
+    <div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px">
+        <div class="stat-card">
+          <div class="stat-value" style={totalRestant > 0 ? 'color:#991b1b' : ''}>
+            {totalRestant.toFixed(2)} {currency}
+          </div>
+          <div class="stat-label">Total restant</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" style="color:#166534">{totalPlatit.toFixed(2)} {currency}</div>
+          <div class="stat-label">Total plătit</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">{payments.length}</div>
+          <div class="stat-label">Total înregistrări</div>
+        </div>
+      </div>
+
+      {totalRestant > 0 && (
+        <div class="alert alert-warning" style="margin-bottom:20px">
+          ⚠️ Există plăți neachitate în valoare de <strong>{totalRestant.toFixed(2)} {currency}</strong>.
+          Vă rugăm să contactați clubul pentru detalii.
+        </div>
+      )}
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Plăți — {child.first_name} {child.last_name}</span>
+        </div>
+        {payments.length === 0 ? (
+          <p style="color:#94a3b8;font-size:14px">Nicio plată înregistrată.</p>
+        ) : (
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Descriere</th>
+                <th>Sumă</th>
+                <th>Scadență</th>
+                <th>Data plății</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {payments.map(p => (
+                <tr>
+                  <td>{p.description ?? '—'}</td>
+                  <td style="font-weight:500">{Number(p.amount ?? 0).toFixed(2)} {p.currency}</td>
+                  <td>{p.due_date ?? '—'}</td>
+                  <td>{p.paid_date ?? '—'}</td>
+                  <td>
+                    <span class={`badge ${statusBadge[p.status] ?? 'badge-gray'}`}>
+                      {statusLabel[p.status] ?? p.status}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  )}
+</ParentLayout>

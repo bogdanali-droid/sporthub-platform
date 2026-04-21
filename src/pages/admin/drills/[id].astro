@@ -1,0 +1,203 @@
+---
+import AdminLayout from '@/layouts/AdminLayout.astro';
+if (!Astro.locals.user) return Astro.redirect('/login');
+const user = Astro.locals.user;
+const db = (Astro.locals as any).runtime?.env?.DB;
+const drillId = Astro.params.id!;
+
+import { queryFirst } from '@/lib/db';
+import { getClubSportConfig } from '@/lib/sport-config';
+
+const [drill, sport] = await Promise.all([
+  queryFirst<any>(db,
+    `SELECT * FROM drills WHERE id=? AND is_active=1 AND (club_id=? OR club_id IS NULL)`,
+    [drillId, user.club_id]),
+  getClubSportConfig(db, user.club_id!),
+]);
+
+if (!drill) return Astro.redirect('/admin/drills');
+
+const isOwn = drill.club_id === user.club_id;
+const difficultyLabel: Record<string,string> = { BEGINNER:'Începător', INTERMEDIATE:'Intermediar', ADVANCED:'Avansat' };
+const difficultyColor: Record<string,string> = {
+  BEGINNER: 'background:#d1fae5;color:#065f46',
+  INTERMEDIATE: 'background:#fef3c7;color:#92400e',
+  ADVANCED: 'background:#fee2e2;color:#991b1b',
+};
+const catLabel = sport?.drillCategories.find(c => c.code === drill.category)?.name_ro ?? drill.category ?? '—';
+---
+
+<AdminLayout title={drill.title} user={user} sportCode={sport?.code} sportIcon={sport?.icon}>
+
+  <div class="page-head">
+    <a href="/admin/drills" class="back-link">← Înapoi la Drill-uri</a>
+    {isOwn && (
+      <div class="head-actions">
+        <button class="btn-secondary" onclick="openEdit()">✏️ Editează</button>
+        <button class="btn-danger" onclick="confirmDelete()">🗑️ Șterge</button>
+      </div>
+    )}
+  </div>
+
+  <div class="detail-card">
+    <div class="detail-header">
+      <h1 class="drill-title">{drill.title}</h1>
+      {!isOwn && <span class="badge badge-global">Global</span>}
+    </div>
+
+    <div class="meta-row">
+      {drill.category && (
+        <span class="badge" style="background:#ede9fe;color:#5b21b6">{catLabel}</span>
+      )}
+      {drill.difficulty && (
+        <span class="badge" style={difficultyColor[drill.difficulty]}>{difficultyLabel[drill.difficulty] ?? drill.difficulty}</span>
+      )}
+      {drill.duration_minutes && (
+        <span class="meta-item">⏱ {drill.duration_minutes} minute</span>
+      )}
+      <span class="meta-item text-gray">{drill.sport_code}</span>
+    </div>
+
+    {drill.description ? (
+      <div class="description">
+        <h3>Descriere</h3>
+        <p>{drill.description}</p>
+      </div>
+    ) : (
+      <p class="text-gray" style="margin-top:16px">Nicio descriere disponibilă.</p>
+    )}
+
+    <div class="detail-footer text-sm text-gray">
+      Creat la: {drill.created_at?.slice(0,10) ?? '—'}
+    </div>
+  </div>
+
+  {isOwn && (
+    <div id="modal" class="modal-overlay hidden">
+      <div class="modal">
+        <div class="modal-head">
+          <h2>Editează Drill</h2>
+          <button onclick="closeEdit()" class="btn-close">×</button>
+        </div>
+        <form id="edit-form" class="modal-body">
+          <div class="form-group">
+            <label>Titlu *</label>
+            <input id="f-title" required value={drill.title} />
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Categorie</label>
+              <select id="f-category">
+                <option value="">— nicio categorie —</option>
+                {(sport?.drillCategories ?? []).map(c => (
+                  <option value={c.code} selected={drill.category === c.code}>{c.name_ro}</option>
+                ))}
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Dificultate</label>
+              <select id="f-difficulty">
+                <option value="">— nicio dificultate —</option>
+                <option value="BEGINNER"     selected={drill.difficulty === 'BEGINNER'}>Începător</option>
+                <option value="INTERMEDIATE" selected={drill.difficulty === 'INTERMEDIATE'}>Intermediar</option>
+                <option value="ADVANCED"     selected={drill.difficulty === 'ADVANCED'}>Avansat</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Durată (minute)</label>
+            <input id="f-duration" type="number" min="1" max="240" value={drill.duration_minutes ?? ''} />
+          </div>
+          <div class="form-group">
+            <label>Descriere</label>
+            <textarea id="f-description" rows="5" style="width:100%;padding:9px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;font-family:inherit;resize:vertical">{drill.description ?? ''}</textarea>
+          </div>
+          <div class="modal-footer">
+            <button type="button" onclick="closeEdit()" class="btn-secondary">Anulează</button>
+            <button type="submit" class="btn-primary">Salvează</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )}
+
+</AdminLayout>
+
+<style>
+  .page-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:10px}
+  .back-link{color:#0f4c81;text-decoration:none;font-size:14px;font-weight:500}
+  .back-link:hover{text-decoration:underline}
+  .head-actions{display:flex;gap:8px}
+  .detail-card{background:#fff;border-radius:16px;padding:28px 32px;box-shadow:0 1px 4px rgba(0,0,0,.07);max-width:720px}
+  .detail-header{display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap}
+  .drill-title{font-size:22px;font-weight:700;color:#1e293b;margin:0}
+  .badge{padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600}
+  .badge-global{background:#f1f5f9;color:#64748b}
+  .meta-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:20px}
+  .meta-item{font-size:13px;color:#475569;background:#f8fafc;padding:4px 10px;border-radius:8px}
+  .description h3{font-size:14px;font-weight:600;color:#374151;margin:0 0 8px}
+  .description p{font-size:15px;color:#374151;line-height:1.7;white-space:pre-wrap;margin:0}
+  .detail-footer{margin-top:24px;padding-top:16px;border-top:1px solid #f1f5f9}
+  .text-sm{font-size:12px}.text-gray{color:#94a3b8}
+  .btn-primary{background:#0f4c81;color:#fff;border:none;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;font-family:inherit}
+  .btn-secondary{background:#f1f5f9;color:#374151;border:none;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;font-family:inherit}
+  .btn-danger{background:#fee2e2;color:#991b1b;border:none;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;font-family:inherit}
+  .btn-danger:hover{background:#fecaca}
+  .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:flex;align-items:center;justify-content:center;padding:16px}
+  .modal-overlay.hidden{display:none}
+  .modal{background:#fff;border-radius:16px;width:100%;max-width:520px;max-height:90vh;overflow-y:auto}
+  .modal-head{display:flex;justify-content:space-between;align-items:center;padding:20px 24px;border-bottom:1px solid #f1f5f9}
+  .modal-head h2{font-size:18px;color:#1e293b;margin:0}
+  .btn-close{background:none;border:none;font-size:22px;cursor:pointer;color:#64748b}
+  .modal-body{padding:24px}
+  .form-row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .form-group{margin-bottom:16px}
+  .form-group label{display:block;font-size:13px;font-weight:500;color:#374151;margin-bottom:6px}
+  .form-group input,.form-group select{width:100%;padding:9px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;font-family:inherit}
+  .modal-footer{display:flex;justify-content:flex-end;gap:10px;padding-top:8px}
+</style>
+
+<script define:vars={{ drillId }}>
+  const DRILL_ID = drillId;
+
+  function openEdit() {
+    document.getElementById('modal')?.classList.remove('hidden');
+  }
+  function closeEdit() {
+    document.getElementById('modal')?.classList.add('hidden');
+  }
+
+  async function confirmDelete() {
+    if (!confirm('Ești sigur că vrei să ștergi acest drill?')) return;
+    const r = await fetch(`/api/admin/drills/${DRILL_ID}`, { method: 'DELETE' });
+    if (r.ok) {
+      window.location.href = '/admin/drills';
+    } else {
+      const e = await r.json();
+      alert(e.error ?? 'Eroare la ștergere');
+    }
+  }
+
+  document.getElementById('edit-form')?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const body = {
+      title:            (document.getElementById('f-title') as HTMLInputElement).value,
+      category:         (document.getElementById('f-category') as HTMLSelectElement).value || null,
+      difficulty:       (document.getElementById('f-difficulty') as HTMLSelectElement).value || null,
+      duration_minutes: (document.getElementById('f-duration') as HTMLInputElement).value || null,
+      description:      (document.getElementById('f-description') as HTMLTextAreaElement).value || null,
+    };
+    const r = await fetch(`/api/admin/drills/${DRILL_ID}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (r.ok) {
+      closeEdit();
+      window.location.reload();
+    } else {
+      const err = await r.json();
+      alert(err.error ?? 'Eroare la salvare');
+    }
+  });
+</script>

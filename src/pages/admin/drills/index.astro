@@ -1,0 +1,224 @@
+---
+import AdminLayout from '@/layouts/AdminLayout.astro';
+if (!Astro.locals.user) return Astro.redirect('/login');
+const user = Astro.locals.user;
+const env = (Astro.locals as any).runtime?.env;
+import { queryAll } from '@/lib/db';
+import { getClubSportConfig } from '@/lib/sport-config';
+
+const sport = await getClubSportConfig(env.DB, user.club_id!);
+
+const filterCat  = Astro.url.searchParams.get('category') ?? '';
+const filterDiff = Astro.url.searchParams.get('difficulty') ?? '';
+
+let sql = `SELECT * FROM drills WHERE (club_id=? OR club_id IS NULL) AND is_active=1`;
+const sqlParams: any[] = [user.club_id];
+if (filterCat)  { sql += ` AND category=?`;   sqlParams.push(filterCat); }
+if (filterDiff) { sql += ` AND difficulty=?`; sqlParams.push(filterDiff); }
+sql += ` ORDER BY created_at DESC`;
+
+const drills = await queryAll<any>(env.DB, sql, sqlParams);
+
+const difficultyLabel: Record<string,string> = { BEGINNER:'Începător', INTERMEDIATE:'Intermediar', ADVANCED:'Avansat' };
+const difficultyColor: Record<string,string> = { BEGINNER:'#d1fae5;color:#065f46', INTERMEDIATE:'#fef3c7;color:#92400e', ADVANCED:'#fee2e2;color:#991b1b' };
+---
+
+<AdminLayout title="Drill-uri" user={user} sportCode={sport?.code} sportIcon={sport?.icon}>
+
+  <div class="toolbar">
+    <div class="filters">
+      <select class="filter-sel" onchange="applyFilter()" id="f-cat">
+        <option value="">Toate categoriile</option>
+        {(sport?.drillCategories ?? []).map(c => (
+          <option value={c.code} selected={filterCat === c.code}>{c.name_ro}</option>
+        ))}
+      </select>
+      <select class="filter-sel" onchange="applyFilter()" id="f-diff">
+        <option value="">Toate nivelurile</option>
+        <option value="BEGINNER"     selected={filterDiff==='BEGINNER'}>Începător</option>
+        <option value="INTERMEDIATE" selected={filterDiff==='INTERMEDIATE'}>Intermediar</option>
+        <option value="ADVANCED"     selected={filterDiff==='ADVANCED'}>Avansat</option>
+      </select>
+    </div>
+    <button class="btn-primary" onclick="openModal()">+ Drill nou</button>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>Titlu</th><th>Categorie</th><th>Dificultate</th><th>Durată</th><th>Sport</th><th>Acțiuni</th>
+      </tr></thead>
+      <tbody>
+        {drills.length === 0 && (
+          <tr><td colspan="6" style="text-align:center;padding:32px;color:#94a3b8">Niciun drill găsit</td></tr>
+        )}
+        {drills.map(d => {
+          const isOwn = d.club_id === user.club_id;
+          const catLabel = sport?.drillCategories.find(c => c.code === d.category)?.name_ro ?? d.category ?? '—';
+          return (
+            <tr>
+              <td>
+                <a class="fw600 drill-link" href={`/admin/drills/${d.id}`}>{d.title}</a>
+                {!isOwn && <span class="badge" style="background:#f1f5f9;color:#64748b;margin-left:6px">Global</span>}
+              </td>
+              <td><span class="badge" style="background:#ede9fe;color:#5b21b6">{catLabel}</span></td>
+              <td>
+                {d.difficulty
+                  ? <span class="badge" style={`background:${difficultyColor[d.difficulty] ?? '#f1f5f9;color:#374151'}`}>{difficultyLabel[d.difficulty] ?? d.difficulty}</span>
+                  : <span class="text-gray">—</span>}
+              </td>
+              <td>{d.duration_minutes ? `${d.duration_minutes} min` : '—'}</td>
+              <td><span class="text-sm text-gray">{d.sport_code}</span></td>
+              <td>
+                <a class="btn-icon" href={`/admin/drills/${d.id}`} title="Detalii">👁️</a>
+                {isOwn && <>
+                  <button class="btn-icon" onclick={`editDrill(${JSON.stringify(d)})`} title="Editează">✏️</button>
+                  <button class="btn-icon" onclick={`deleteDrill('${d.id}')`} title="Șterge">🗑️</button>
+                </>}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- MODAL CREATE/EDIT -->
+  <div id="modal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-head">
+        <h2 id="modal-title">Drill nou</h2>
+        <button onclick="closeModal()" class="btn-close">×</button>
+      </div>
+      <form id="drill-form" class="modal-body">
+        <input type="hidden" id="drill-id" />
+        <div class="form-group">
+          <label>Titlu *</label>
+          <input id="f-title" required placeholder="ex: Pasă dublă" />
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Categorie</label>
+            <select id="f-category">
+              <option value="">— nicio categorie —</option>
+              {(sport?.drillCategories ?? []).map(c => (
+                <option value={c.code}>{c.name_ro}</option>
+              ))}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Dificultate</label>
+            <select id="f-difficulty">
+              <option value="">— nicio dificultate —</option>
+              <option value="BEGINNER">Începător</option>
+              <option value="INTERMEDIATE">Intermediar</option>
+              <option value="ADVANCED">Avansat</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Durată (minute)</label>
+          <input id="f-duration" type="number" min="1" max="240" placeholder="ex: 15" />
+        </div>
+        <div class="form-group">
+          <label>Descriere</label>
+          <textarea id="f-description" rows="4" placeholder="Descrierea exercițiului..." style="width:100%;padding:9px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;font-family:inherit;resize:vertical"></textarea>
+        </div>
+        <div class="modal-footer">
+          <button type="button" onclick="closeModal()" class="btn-secondary">Anulează</button>
+          <button type="submit" class="btn-primary">Salvează</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+</AdminLayout>
+
+<style>
+  .toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;gap:12px}
+  .filters{display:flex;gap:8px;flex-wrap:wrap}
+  .filter-sel{padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:13px;font-family:inherit}
+  .table-wrap{background:#fff;border-radius:12px;overflow:auto;box-shadow:0 1px 4px rgba(0,0,0,.07)}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th{text-align:left;padding:12px 16px;border-bottom:2px solid #f1f5f9;color:#64748b;font-size:12px;font-weight:600;text-transform:uppercase}
+  td{padding:11px 16px;border-bottom:1px solid #f8fafc;vertical-align:middle}
+  tr:last-child td{border-bottom:none}
+  .fw600{font-weight:600;color:#1e293b}.text-sm{font-size:12px}.text-gray{color:#94a3b8}
+  .drill-link{text-decoration:none;color:#1e293b;font-weight:600}.drill-link:hover{color:#0f4c81}
+  .badge{padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600}
+  .btn-icon{background:none;border:none;cursor:pointer;font-size:15px;padding:3px 5px;border-radius:4px;text-decoration:none}
+  .btn-icon:hover{background:#f1f5f9}
+  .btn-primary{background:#0f4c81;color:#fff;border:none;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;font-family:inherit}
+  .btn-secondary{background:#f1f5f9;color:#374151;border:none;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;font-family:inherit}
+  .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:flex;align-items:center;justify-content:center;padding:16px}
+  .modal-overlay.hidden{display:none}
+  .modal{background:#fff;border-radius:16px;width:100%;max-width:520px;max-height:90vh;overflow-y:auto}
+  .modal-head{display:flex;justify-content:space-between;align-items:center;padding:20px 24px;border-bottom:1px solid #f1f5f9}
+  .modal-head h2{font-size:18px;color:#1e293b}
+  .btn-close{background:none;border:none;font-size:22px;cursor:pointer;color:#64748b}
+  .modal-body{padding:24px}
+  .form-row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .form-group{margin-bottom:16px}
+  .form-group label{display:block;font-size:13px;font-weight:500;color:#374151;margin-bottom:6px}
+  .form-group input,.form-group select{width:100%;padding:9px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;font-family:inherit}
+  .modal-footer{display:flex;justify-content:flex-end;gap:10px;padding-top:8px}
+</style>
+
+<script>
+  const SPORT_CODE = document.querySelector('meta[name="sport-code"]')?.getAttribute('content') ?? '';
+
+  function applyFilter() {
+    const cat  = (document.getElementById('f-cat')  as HTMLSelectElement).value;
+    const diff = (document.getElementById('f-diff') as HTMLSelectElement).value;
+    const url = new URL(window.location.href);
+    cat  ? url.searchParams.set('category',   cat)  : url.searchParams.delete('category');
+    diff ? url.searchParams.set('difficulty', diff) : url.searchParams.delete('difficulty');
+    window.location.href = url.toString();
+  }
+
+  let editingId: string | null = null;
+
+  function openModal() {
+    editingId = null;
+    (document.getElementById('modal-title') as HTMLElement).textContent = 'Drill nou';
+    (document.getElementById('drill-form')  as HTMLFormElement).reset();
+    (document.getElementById('modal')       as HTMLElement).classList.remove('hidden');
+  }
+
+  function closeModal() {
+    (document.getElementById('modal') as HTMLElement).classList.add('hidden');
+  }
+
+  function editDrill(d: any) {
+    editingId = d.id;
+    (document.getElementById('modal-title')   as HTMLElement).textContent = 'Editează drill';
+    (document.getElementById('f-title')       as HTMLInputElement).value  = d.title ?? '';
+    (document.getElementById('f-category')    as HTMLSelectElement).value = d.category ?? '';
+    (document.getElementById('f-difficulty')  as HTMLSelectElement).value = d.difficulty ?? '';
+    (document.getElementById('f-duration')    as HTMLInputElement).value  = d.duration_minutes ?? '';
+    (document.getElementById('f-description') as HTMLTextAreaElement).value = d.description ?? '';
+    (document.getElementById('modal')         as HTMLElement).classList.remove('hidden');
+  }
+
+  async function deleteDrill(id: string) {
+    if (!confirm('Ștergi acest drill?')) return;
+    const r = await fetch(`/api/admin/drills/${id}`, { method: 'DELETE' });
+    if (r.ok) location.reload(); else { const e = await r.json(); alert(e.error ?? 'Eroare'); }
+  }
+
+  document.getElementById('drill-form')?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const body: any = {
+      title:            (document.getElementById('f-title')       as HTMLInputElement).value,
+      category:         (document.getElementById('f-category')    as HTMLSelectElement).value || null,
+      difficulty:       (document.getElementById('f-difficulty')  as HTMLSelectElement).value || null,
+      duration_minutes: (document.getElementById('f-duration')    as HTMLInputElement).value  || null,
+      description:      (document.getElementById('f-description') as HTMLTextAreaElement).value || null,
+      sport_code:       document.body.dataset.sportCode ?? 'BASEBALL5',
+    };
+    const url    = editingId ? `/api/admin/drills/${editingId}` : '/api/admin/drills';
+    const method = editingId ? 'PUT' : 'POST';
+    const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (r.ok) { closeModal(); location.reload(); } else { const err = await r.json(); alert(err.error ?? 'Eroare'); }
+  });
+</script>

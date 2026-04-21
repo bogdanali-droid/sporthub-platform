@@ -1,0 +1,177 @@
+---
+import ParentLayout from '@/layouts/ParentLayout.astro';
+import { queryFirst, queryAll } from '@/lib/db';
+
+if (!Astro.locals.user) return Astro.redirect('/login');
+const user = Astro.locals.user;
+if (!['PARENT', 'SUPERADMIN'].includes(user.role)) return Astro.redirect('/login');
+
+const db = (Astro.locals as any).runtime?.env?.DB;
+
+const child = await queryFirst<any>(db, 'SELECT * FROM players WHERE parent_user_id=?', [user.id]);
+
+let stats = { prezenteLuna: 0, platiRestante: 0, medieEvaluare: 0, aptMedical: null as boolean | null };
+let recentAttendance: any[] = [];
+let recentPayments: any[] = [];
+
+if (child) {
+  const today = new Date().toISOString().slice(0, 10);
+  const firstOfMonth = today.slice(0, 7) + '-01';
+
+  const prezRow = await queryFirst<any>(db,
+    `SELECT COUNT(*) AS cnt FROM attendance WHERE player_id=? AND status='PRESENT' AND date >= ?`,
+    [child.id, firstOfMonth]
+  );
+  stats.prezenteLuna = prezRow?.cnt ?? 0;
+
+  const platiRow = await queryFirst<any>(db,
+    `SELECT COUNT(*) AS cnt FROM payments WHERE player_id=? AND status='PENDING' AND due_date < ?`,
+    [child.id, today]
+  );
+  stats.platiRestante = platiRow?.cnt ?? 0;
+
+  const evalRow = await queryFirst<any>(db,
+    `SELECT AVG(pes.score) AS avg_score FROM player_evaluation_scores pes
+     JOIN player_evaluations pe ON pe.id=pes.evaluation_id WHERE pe.player_id=?`,
+    [child.id]
+  );
+  stats.medieEvaluare = evalRow?.avg_score ? Number(evalRow.avg_score).toFixed(1) : 0;
+
+  const medRow = await queryFirst<any>(db,
+    `SELECT is_fit FROM medical_records WHERE player_id=? ORDER BY visit_date DESC LIMIT 1`,
+    [child.id]
+  );
+  stats.aptMedical = medRow ? Boolean(medRow.is_fit) : null;
+
+  recentAttendance = await queryAll<any>(db,
+    `SELECT a.status, a.type, a.date, t.training_date, m.match_date, m.opponent_name
+     FROM attendance a
+     LEFT JOIN trainings t ON t.id=a.training_id
+     LEFT JOIN matches m ON m.id=a.match_id
+     WHERE a.player_id=?
+     ORDER BY COALESCE(t.training_date, m.match_date, a.date) DESC
+     LIMIT 3`,
+    [child.id]
+  );
+
+  recentPayments = await queryAll<any>(db,
+    `SELECT description, amount, currency, status, due_date FROM payments
+     WHERE player_id=? ORDER BY due_date DESC LIMIT 3`,
+    [child.id]
+  );
+}
+
+const childName = child ? `${child.first_name} ${child.last_name}` : undefined;
+
+const payStatusBadge: Record<string, string> = {
+  PAID: 'badge-green',
+  PENDING: 'badge-yellow',
+  OVERDUE: 'badge-red',
+};
+const attStatusBadge: Record<string, string> = {
+  PRESENT: 'badge-green',
+  ABSENT: 'badge-red',
+  LATE: 'badge-yellow',
+  EXCUSED: 'badge-gray',
+};
+---
+
+<ParentLayout title="Dashboard" user={user} childName={childName}>
+  {!child ? (
+    <div class="card" style="text-align:center;padding:48px 24px">
+      <div style="font-size:48px;margin-bottom:16px">⚠️</div>
+      <h2 style="color:#1e293b;margin-bottom:8px">Cont neconectat la un profil de jucător</h2>
+      <p style="color:#64748b">Contactează administratorul clubului pentru a-ți lega contul de profilul copilului.</p>
+    </div>
+  ) : (
+    <div>
+      <div style="margin-bottom:24px">
+        <h1 style="font-size:22px;font-weight:700;color:#1e293b">
+          Bun venit! Urmărești activitatea lui {child.first_name} {child.last_name}
+        </h1>
+        <p style="color:#64748b;font-size:14px;margin-top:4px">
+          Sport: {child.sport_code ?? '—'} · Poziție: {child.position ?? '—'}
+        </p>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:24px">
+        <div class="stat-card">
+          <div class="stat-value">{stats.prezenteLuna}</div>
+          <div class="stat-label">Prezențe luna aceasta</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" style={stats.platiRestante > 0 ? 'color:#991b1b' : ''}>
+            {stats.platiRestante}
+          </div>
+          <div class="stat-label">Plăți restante</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">{stats.medieEvaluare || '—'}</div>
+          <div class="stat-label">Medie evaluare</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">
+            {stats.aptMedical === null
+              ? <span class="badge badge-gray">N/A</span>
+              : stats.aptMedical
+                ? <span class="badge badge-green">APT</span>
+                : <span class="badge badge-red">INAPT</span>
+            }
+          </div>
+          <div class="stat-label">Status medical</div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Prezențe recente</span>
+            <a href="/parent/attendance" class="btn btn-outline btn-sm">Vezi toate</a>
+          </div>
+          {recentAttendance.length === 0 ? (
+            <p style="color:#94a3b8;font-size:14px">Nicio prezență înregistrată.</p>
+          ) : (
+            <div style="display:flex;flex-direction:column;gap:8px">
+              {recentAttendance.map(a => (
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:8px;background:#f8fafc;border-radius:6px">
+                  <div style="font-size:13px;color:#374151">
+                    {a.training_date ?? a.match_date ?? a.date ?? '—'}
+                    {a.opponent_name && ` · vs ${a.opponent_name}`}
+                  </div>
+                  <span class={`badge ${attStatusBadge[a.status] ?? 'badge-gray'}`}>
+                    {a.status}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Plăți recente</span>
+            <a href="/parent/payments" class="btn btn-outline btn-sm">Vezi toate</a>
+          </div>
+          {recentPayments.length === 0 ? (
+            <p style="color:#94a3b8;font-size:14px">Nicio plată înregistrată.</p>
+          ) : (
+            <div style="display:flex;flex-direction:column;gap:8px">
+              {recentPayments.map(p => (
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:8px;background:#f8fafc;border-radius:6px">
+                  <div>
+                    <div style="font-size:13px;color:#374151">{p.description ?? '—'}</div>
+                    <div style="font-size:11px;color:#64748b">{p.due_date}</div>
+                  </div>
+                  <div style="text-align:right">
+                    <div style="font-size:13px;font-weight:600;color:#1e293b">{p.amount} {p.currency}</div>
+                    <span class={`badge ${payStatusBadge[p.status] ?? 'badge-gray'}`}>{p.status}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )}
+</ParentLayout>

@@ -1,0 +1,170 @@
+---
+import FederatieLayout from '@/layouts/FederatieLayout.astro';
+if (!Astro.locals.user) return Astro.redirect('/login/federatie');
+const user = Astro.locals.user;
+if (!['FEDERATION_ADMIN','SUPERADMIN'].includes(user.role)) return Astro.redirect('/login/federatie');
+const db = (Astro.locals as any).runtime?.env?.DB;
+import { queryAll, queryFirst } from '@/lib/db';
+
+const { id } = Astro.params;
+const msg = Astro.url.searchParams.get('msg');
+
+const comp = await queryFirst<any>(db,
+  `SELECT * FROM federation_competitions WHERE id = ?`, [id]);
+if (!comp) return Astro.redirect('/federatie-admin/competitii');
+
+const groups = await queryAll<any>(db,
+  `SELECT * FROM competition_groups WHERE competition_id = ? ORDER BY name`, [id]);
+
+const groupIds = groups.map((g: any) => g.id);
+let groupTeams: any[] = [];
+if (groupIds.length > 0) {
+  const placeholders = groupIds.map(() => '?').join(',');
+  groupTeams = await queryAll<any>(db,
+    `SELECT cgt.*, cg.name AS group_name
+     FROM competition_group_teams cgt
+     JOIN competition_groups cg ON cg.id = cgt.group_id
+     WHERE cgt.group_id IN (${placeholders})
+     ORDER BY cg.name, cgt.points DESC, cgt.wins DESC`,
+    groupIds);
+}
+
+const clubs = await queryAll<any>(db,
+  `SELECT id, name FROM clubs ORDER BY name`, []);
+
+const formatLabel: Record<string,string> = {
+  LEAGUE: 'Ligă', CUP: 'Cupă', GROUPS_KNOCKOUT: 'Grupe + Eliminatorii'
+};
+---
+
+<FederatieLayout title={comp.name} user={user} section="CCLTC">
+
+  <div style="margin-bottom:20px">
+    <a href="/federatie-admin/competitii" style="font-size:13px;color:#64748b;text-decoration:none">← Înapoi la competiții</a>
+    <h1 style="font-size:20px;font-weight:700;color:#1e293b;margin-top:8px">{comp.name}</h1>
+    <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap;align-items:center">
+      <span class="badge badge-blue">{comp.sport_code}</span>
+      <span class="badge badge-gray">Sezon {comp.season}</span>
+      {comp.age_group && <span class="badge badge-gray">{comp.age_group}</span>}
+      {comp.format && <span class="badge badge-gray">{formatLabel[comp.format] ?? comp.format}</span>}
+      {comp.innings_count && <span class="badge badge-gray">{comp.innings_count} innings</span>}
+      <span class={`badge ${comp.is_active ? 'badge-green' : 'badge-gray'}`}>
+        {comp.is_active ? 'Activă' : 'Inactivă'}
+      </span>
+    </div>
+  </div>
+
+  {msg === 'grupa-creata' && <div class="alert alert-success">Grupa a fost creată.</div>}
+  {msg === 'echipa-adaugata' && <div class="alert alert-success">Echipa a fost adăugată în grupă.</div>}
+
+  <!-- Secțiunea grupe -->
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+    <h2 style="font-size:16px;font-weight:600;color:#1e293b">Grupe competiție</h2>
+    <button class="btn btn-gold btn-sm" onclick="document.getElementById('modal-grupa').classList.add('open')">+ Grupă nouă</button>
+  </div>
+
+  {groups.length === 0 && (
+    <div class="card" style="text-align:center;color:#64748b;padding:32px">
+      Nu există grupe definite pentru această competiție.
+    </div>
+  )}
+
+  {groups.map((g: any) => {
+    const teams = groupTeams.filter((t: any) => t.group_id === g.id);
+    return (
+      <div class="card" style="margin-bottom:16px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <h3 style="font-size:15px;font-weight:600;color:#1e293b">{g.name}</h3>
+          <button
+            class="btn btn-outline btn-sm"
+            onclick={`document.getElementById('modal-team-${g.id}').classList.add('open')`}
+          >
+            + Adaugă echipă
+          </button>
+        </div>
+
+        <table class="table">
+          <thead>
+            <tr>
+              <th>#</th><th>Echipă</th><th style="text-align:center">V</th>
+              <th style="text-align:center">Î</th><th style="text-align:center">Pct</th>
+            </tr>
+          </thead>
+          <tbody>
+            {teams.length === 0 && (
+              <tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:16px">Nicio echipă adăugată.</td></tr>
+            )}
+            {teams.map((t: any, idx: number) => (
+              <tr>
+                <td style="color:#64748b;font-weight:600">{idx + 1}</td>
+                <td style="font-weight:500">{t.team_name}</td>
+                <td style="text-align:center">{t.wins}</td>
+                <td style="text-align:center">{t.losses}</td>
+                <td style="text-align:center;font-weight:700">{t.points}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  })}
+
+  <!-- Modal creare grupă -->
+  <div class="modal-overlay" id="modal-grupa">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">Grupă nouă</span>
+        <button class="modal-close" onclick="document.getElementById('modal-grupa').classList.remove('open')">✕</button>
+      </div>
+      <form method="POST" action="/api/federatie-admin/competitii/create-group">
+        <input type="hidden" name="competition_id" value={comp.id} />
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">Denumire grupă *</label>
+            <input type="text" name="name" class="form-input" required placeholder="ex. Grupa A" />
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" onclick="document.getElementById('modal-grupa').classList.remove('open')">Anulează</button>
+          <button type="submit" class="btn btn-gold">Creează grupă</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modals adăugare echipă (per grupă) -->
+  {groups.map((g: any) => (
+    <div class="modal-overlay" id={`modal-team-${g.id}`}>
+      <div class="modal">
+        <div class="modal-header">
+          <span class="modal-title">Adaugă echipă în {g.name}</span>
+          <button class="modal-close" onclick={`document.getElementById('modal-team-${g.id}').classList.remove('open')`}>✕</button>
+        </div>
+        <form method="POST" action="/api/federatie-admin/competitii/add-team">
+          <input type="hidden" name="group_id" value={g.id} />
+          <input type="hidden" name="competition_id" value={comp.id} />
+          <div class="modal-body">
+            <div class="form-group">
+              <label class="form-label">Club *</label>
+              <select name="club_id" class="form-select" required>
+                <option value="">— Selectează club —</option>
+                {clubs.map((c: any) => (
+                  <option value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Denumire echipă *</label>
+              <input type="text" name="team_name" class="form-input" required placeholder="ex. Wolves București" />
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline" onclick={`document.getElementById('modal-team-${g.id}').classList.remove('open')`}>Anulează</button>
+            <button type="submit" class="btn btn-gold">Adaugă echipă</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  ))}
+
+</FederatieLayout>

@@ -1,0 +1,92 @@
+---
+import ParentLayout from '@/layouts/ParentLayout.astro';
+import { queryFirst, queryAll } from '@/lib/db';
+
+if (!Astro.locals.user) return Astro.redirect('/login');
+const user = Astro.locals.user;
+if (!['PARENT', 'SUPERADMIN'].includes(user.role)) return Astro.redirect('/login');
+
+const db = (Astro.locals as any).runtime?.env?.DB;
+
+const child = await queryFirst<any>(db, 'SELECT * FROM players WHERE parent_user_id=?', [user.id]);
+
+let events: any[] = [];
+
+if (child) {
+  const trainings = await queryAll<any>(db,
+    `SELECT 'TRAINING' AS type, t.training_date AS date, t.start_time, t.location, '' AS label
+     FROM trainings t
+     WHERE t.club_id=? AND t.training_date >= date('now')
+     ORDER BY t.training_date
+     LIMIT 20`,
+    [child.club_id]
+  );
+
+  const matches = await queryAll<any>(db,
+    `SELECT 'MATCH' AS type, m.match_date AS date, '' AS start_time, m.location,
+            m.opponent_name AS label
+     FROM matches m
+     WHERE m.club_id=? AND m.match_date >= date('now') AND m.status != 'CANCELLED'
+     ORDER BY m.match_date
+     LIMIT 20`,
+    [child.club_id]
+  );
+
+  events = [...trainings, ...matches].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+const childName = child ? `${child.first_name} ${child.last_name}` : undefined;
+---
+
+<ParentLayout title="Calendar" user={user} childName={childName}>
+  {!child ? (
+    <div class="card" style="text-align:center;padding:48px 24px">
+      <div style="font-size:48px;margin-bottom:16px">⚠️</div>
+      <h2 style="color:#1e293b;margin-bottom:8px">Cont neconectat la un profil de jucător</h2>
+      <p style="color:#64748b">Contactează administratorul clubului pentru a-ți lega contul de profilul copilului.</p>
+    </div>
+  ) : (
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Evenimente viitoare</span>
+        <span class="badge badge-blue">{events.length} evenimente</span>
+      </div>
+      {events.length === 0 ? (
+        <p style="color:#94a3b8;font-size:14px">Niciun eveniment programat în perioada următoare.</p>
+      ) : (
+        <div style="display:flex;flex-direction:column;gap:8px">
+          {events.map(ev => (
+            <div style="display:flex;align-items:center;gap:16px;padding:12px;border:1px solid #f1f5f9;border-radius:8px">
+              <div style="min-width:100px;text-align:center;background:#f8fafc;border-radius:6px;padding:8px">
+                <div style="font-size:18px;font-weight:700;color:#1e293b">{ev.date?.slice(8, 10)}</div>
+                <div style="font-size:11px;color:#64748b;text-transform:uppercase">{
+                  (() => {
+                    const months = ['Ian','Feb','Mar','Apr','Mai','Iun','Iul','Aug','Sep','Oct','Noi','Dec'];
+                    const m = parseInt(ev.date?.slice(5, 7)) - 1;
+                    return months[m] ?? ev.date?.slice(5, 7);
+                  })()
+                }</div>
+              </div>
+              <div style="flex:1">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+                  <span class={`badge ${ev.type === 'MATCH' ? 'badge-blue' : 'badge-green'}`}>
+                    {ev.type === 'MATCH' ? '⚾ Meci' : '🏋️ Antrenament'}
+                  </span>
+                  {ev.start_time && (
+                    <span style="font-size:12px;color:#64748b">🕐 {ev.start_time}</span>
+                  )}
+                </div>
+                {ev.label && (
+                  <div style="font-size:13px;font-weight:500;color:#1e293b">vs {ev.label}</div>
+                )}
+                {ev.location && (
+                  <div style="font-size:12px;color:#64748b;margin-top:2px">📍 {ev.location}</div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )}
+</ParentLayout>

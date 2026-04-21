@@ -1,0 +1,110 @@
+---
+import FederatieLayout from '@/layouts/FederatieLayout.astro';
+if (!Astro.locals.user) return Astro.redirect('/login/federatie');
+const user = Astro.locals.user;
+if (!['FEDERATION_ADMIN','SUPERADMIN'].includes(user.role)) return Astro.redirect('/login/federatie');
+const db = (Astro.locals as any).runtime?.env?.DB;
+import { queryAll } from '@/lib/db';
+
+const msg = Astro.url.searchParams.get('msg');
+const err = Astro.url.searchParams.get('err');
+
+const anunturi = await queryAll<any>(db,
+  `SELECT * FROM federation_announcements ORDER BY created_at DESC LIMIT 100`, []);
+
+const typeBadge: Record<string,string> = {
+  INFO: 'badge-blue', URGENT: 'badge-red', REGULAMENT: 'badge-green'
+};
+const typeLabel: Record<string,string> = {
+  INFO: 'Info', URGENT: 'Urgent', REGULAMENT: 'Regulament'
+};
+const targetLabel: Record<string,string> = {
+  ALL: 'Toți', CLUBS: 'Cluburi'
+};
+---
+
+<FederatieLayout title="Anunțuri" user={user} section="CCLTC">
+
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+    <div>
+      <h1 style="font-size:20px;font-weight:700;color:#1e293b">Anunțuri Federale</h1>
+      <p style="font-size:13px;color:#64748b">Comunicări către cluburi și membri</p>
+    </div>
+    <button class="btn btn-gold" onclick="document.getElementById('modal-add').classList.add('open')">+ Anunț nou</button>
+  </div>
+
+  {msg === 'creat' && <div class="alert alert-success">Anunțul a fost publicat cu succes.</div>}
+  {err && <div class="alert alert-error">Eroare: verifică datele și încearcă din nou.</div>}
+
+  <div class="card">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Titlu</th><th>Tip</th><th>Destinatar</th><th>Data publicării</th>
+        </tr>
+      </thead>
+      <tbody>
+        {anunturi.length === 0 && (
+          <tr><td colspan="4" style="text-align:center;color:#64748b;padding:24px">Nu există anunțuri publicate.</td></tr>
+        )}
+        {anunturi.map((a: any) => (
+          <tr>
+            <td>
+              <div style="font-weight:500;color:#1e293b">{a.title}</div>
+              <div style="font-size:12px;color:#64748b;margin-top:2px;max-width:480px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{a.content}</div>
+            </td>
+            <td><span class={`badge ${typeBadge[a.type] ?? 'badge-gray'}`}>{typeLabel[a.type] ?? a.type}</span></td>
+            <td><span class="badge badge-gray">{targetLabel[a.target] ?? a.target}</span></td>
+            <td style="font-size:12px;color:#64748b;white-space:nowrap">
+              {a.created_at ? new Date(a.created_at).toLocaleDateString('ro-RO', { day:'2-digit', month:'short', year:'numeric' }) : '—'}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Modal creare anunț -->
+  <div class="modal-overlay" id="modal-add">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">Anunț nou</span>
+        <button class="modal-close" onclick="document.getElementById('modal-add').classList.remove('open')">✕</button>
+      </div>
+      <form method="POST" action="/api/federatie-admin/anunturi/create">
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">Titlu *</label>
+            <input type="text" name="title" class="form-input" required placeholder="ex. Convocare ședință tehnică" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Conținut *</label>
+            <textarea name="content" class="form-textarea" rows="5" required placeholder="Textul complet al anunțului..."></textarea>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div class="form-group">
+              <label class="form-label">Tip</label>
+              <select name="type" class="form-select">
+                <option value="INFO">Info</option>
+                <option value="URGENT">Urgent</option>
+                <option value="REGULAMENT">Regulament</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Destinatar</label>
+              <select name="target" class="form-select">
+                <option value="ALL">Toți</option>
+                <option value="CLUBS">Cluburi</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" onclick="document.getElementById('modal-add').classList.remove('open')">Anulează</button>
+          <button type="submit" class="btn btn-gold">Publică anunț</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+</FederatieLayout>

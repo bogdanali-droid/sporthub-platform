@@ -1,0 +1,84 @@
+---
+import AdminLayout from '@/layouts/AdminLayout.astro';
+if (!Astro.locals.user) return Astro.redirect('/login');
+const user = Astro.locals.user;
+const db = (Astro.locals as any).runtime?.env?.DB;
+
+import { queryAll } from '@/lib/db';
+import { getClubSportConfig } from '@/lib/sport-config';
+
+const sport = await getClubSportConfig(db, user.club_id!);
+const sportCode = sport?.code ?? 'BASEBALL5';
+
+const competitions = await queryAll<any>(db,
+  `SELECT * FROM federation_competitions WHERE sport_code=? AND is_active=1 ORDER BY season DESC, name`,
+  [sportCode]);
+---
+
+<AdminLayout title="Competiții" user={user} sportCode={sport?.code} sportIcon={sport?.icon}>
+
+  <div class="toolbar">
+    <h1 class="page-title">Competiții Federale</h1>
+    <span class="badge badge-sport">{sport?.name_ro ?? sportCode}</span>
+  </div>
+
+  {competitions.length === 0 && (
+    <div class="empty-state">
+      <p>Nu există competiții active pentru sportul <strong>{sport?.name_ro ?? sportCode}</strong>.</p>
+      <p class="text-sm text-gray">Competițiile sunt gestionate de federație.</p>
+    </div>
+  )}
+
+  {competitions.length > 0 && (
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Denumire</th>
+          <th>Sport</th>
+          <th>Sezon</th>
+          <th>Categorie de vârstă</th>
+          <th>Format</th>
+          <th>Manșe</th>
+          <th>Detalii</th>
+        </tr></thead>
+        <tbody>
+          {competitions.map(c => (
+            <tr>
+              <td>
+                <a class="comp-link fw600" href={`/admin/competitii/${c.id}`}>{c.name}</a>
+              </td>
+              <td><span class="badge badge-sport">{c.sport_code}</span></td>
+              <td>{c.season ?? '—'}</td>
+              <td>{c.age_group ?? '—'}</td>
+              <td><span class="text-sm">{c.format ?? '—'}</span></td>
+              <td>{c.innings_count ?? '—'}</td>
+              <td>
+                <a class="btn-icon" href={`/admin/competitii/${c.id}`} title="Detalii">👁️</a>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )}
+
+</AdminLayout>
+
+<style>
+  .toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:10px}
+  .page-title{font-size:20px;font-weight:700;color:#1e293b;margin:0}
+  .table-wrap{background:#fff;border-radius:12px;overflow:auto;box-shadow:0 1px 4px rgba(0,0,0,.07)}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th{text-align:left;padding:12px 16px;border-bottom:2px solid #f1f5f9;color:#64748b;font-size:12px;font-weight:600;text-transform:uppercase}
+  td{padding:11px 16px;border-bottom:1px solid #f8fafc;vertical-align:middle}
+  tr:last-child td{border-bottom:none}
+  .fw600{font-weight:600;color:#1e293b}
+  .text-sm{font-size:12px}.text-gray{color:#94a3b8}
+  .comp-link{text-decoration:none;color:#1e293b;font-weight:600}.comp-link:hover{color:#0f4c81}
+  .badge{padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600}
+  .badge-sport{background:#dbeafe;color:#1e40af}
+  .btn-icon{background:none;border:none;cursor:pointer;font-size:15px;padding:3px 5px;border-radius:4px;text-decoration:none}
+  .btn-icon:hover{background:#f1f5f9}
+  .empty-state{background:#fff;border-radius:16px;padding:40px;text-align:center;color:#374151;box-shadow:0 1px 4px rgba(0,0,0,.07)}
+  .empty-state p{margin:4px 0}
+</style>

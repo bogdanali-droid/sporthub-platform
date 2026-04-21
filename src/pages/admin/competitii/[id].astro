@@ -1,0 +1,187 @@
+---
+import AdminLayout from '@/layouts/AdminLayout.astro';
+if (!Astro.locals.user) return Astro.redirect('/login');
+const user = Astro.locals.user;
+const db = (Astro.locals as any).runtime?.env?.DB;
+const compId = Astro.params.id!;
+
+import { queryFirst, queryAll } from '@/lib/db';
+import { getClubSportConfig } from '@/lib/sport-config';
+
+const [competition, sport] = await Promise.all([
+  queryFirst<any>(db, `SELECT * FROM federation_competitions WHERE id=? AND is_active=1`, [compId]),
+  getClubSportConfig(db, user.club_id!),
+]);
+
+if (!competition) return Astro.redirect('/admin/competitii');
+
+// Load groups with their teams
+const groups = await queryAll<any>(db,
+  `SELECT cg.*, GROUP_CONCAT(cgt.team_name) AS teams
+   FROM competition_groups cg
+   LEFT JOIN competition_group_teams cgt ON cgt.group_id = cg.id
+   WHERE cg.competition_id = ?
+   GROUP BY cg.id
+   ORDER BY cg.name`,
+  [compId]);
+
+// Load standings per group
+const groupIds = groups.map(g => g.id);
+const allStandings: Record<string, any[]> = {};
+for (const g of groups) {
+  const rows = await queryAll<any>(db,
+    `SELECT * FROM competition_standings WHERE group_id=? ORDER BY points DESC, wins DESC, team_name`,
+    [g.id]);
+  allStandings[g.id] = rows;
+}
+
+// Fetch this club's team names to highlight rows
+const clubTeams = await queryAll<any>(db,
+  `SELECT name FROM teams WHERE club_id=? AND is_active=1`, [user.club_id]);
+const clubTeamNames = new Set(clubTeams.map((t: any) => t.name.toLowerCase()));
+
+const formatLabel: Record<string,string> = {
+  ROUND_ROBIN: 'Fiecare cu fiecare',
+  KNOCKOUT:    'Eliminatorii',
+  MIXED:       'Mixt',
+};
+---
+
+<AdminLayout title={competition.name} user={user} sportCode={sport?.code} sportIcon={sport?.icon}>
+
+  <div class="page-head">
+    <a href="/admin/competitii" class="back-link">← Înapoi la Competiții</a>
+  </div>
+
+  <!-- Competition header -->
+  <div class="comp-card">
+    <div class="comp-header">
+      <div>
+        <h1 class="comp-name">{competition.name}</h1>
+        <div class="comp-meta">
+          <span class="badge badge-sport">{competition.sport_code}</span>
+          {competition.season && <span class="meta-chip">Sezon: {competition.season}</span>}
+          {competition.age_group && <span class="meta-chip">{competition.age_group}</span>}
+          {competition.format && (
+            <span class="meta-chip">{formatLabel[competition.format] ?? competition.format}</span>
+          )}
+          {competition.innings_count && (
+            <span class="meta-chip">{competition.innings_count} manșe</span>
+          )}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Groups & standings -->
+  {groups.length === 0 && (
+    <div class="empty-state">
+      Nu există grupe configurate pentru această competiție.
+    </div>
+  )}
+
+  {groups.map(g => {
+    const standings = allStandings[g.id] ?? [];
+    const groupTeams = g.teams ? g.teams.split(',') : [];
+    return (
+      <div class="group-block">
+        <h2 class="group-title">
+          {g.name ?? `Grupa ${g.id}`}
+          {groupTeams.length > 0 && (
+            <span class="team-count text-sm text-gray">({groupTeams.length} echipe)</span>
+          )}
+        </h2>
+
+        {standings.length === 0 && (
+          <p class="text-sm text-gray" style="margin-bottom:16px">Niciun clasament disponibil momentan.</p>
+        )}
+
+        {standings.length > 0 && (
+          <div class="table-wrap">
+            <table>
+              <thead><tr>
+                <th>#</th>
+                <th>Echipă</th>
+                <th title="Victorii">V</th>
+                <th title="Înfrângeri">Î</th>
+                <th title="Egaluri">E</th>
+                <th title="Puncte">Pct</th>
+              </tr></thead>
+              <tbody>
+                {standings.map((s, idx) => {
+                  const isMyTeam = clubTeamNames.has((s.team_name ?? '').toLowerCase());
+                  return (
+                    <tr class={isMyTeam ? 'highlight-row' : ''}>
+                      <td class="text-gray text-sm">{idx + 1}</td>
+                      <td class="fw600">
+                        {s.team_name}
+                        {isMyTeam && <span class="badge badge-mine">Noi</span>}
+                      </td>
+                      <td>{s.wins ?? 0}</td>
+                      <td>{s.losses ?? 0}</td>
+                      <td>{s.draws ?? 0}</td>
+                      <td class="fw600 points">{s.points ?? 0}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {groupTeams.length > 0 && standings.length === 0 && (
+          <div class="table-wrap">
+            <table>
+              <thead><tr>
+                <th>#</th>
+                <th>Echipă</th>
+              </tr></thead>
+              <tbody>
+                {groupTeams.map((name: string, idx: number) => {
+                  const isMyTeam = clubTeamNames.has(name.toLowerCase());
+                  return (
+                    <tr class={isMyTeam ? 'highlight-row' : ''}>
+                      <td class="text-gray text-sm">{idx + 1}</td>
+                      <td class="fw600">
+                        {name}
+                        {isMyTeam && <span class="badge badge-mine">Noi</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  })}
+
+</AdminLayout>
+
+<style>
+  .page-head{margin-bottom:16px}
+  .back-link{color:#0f4c81;text-decoration:none;font-size:14px;font-weight:500}
+  .back-link:hover{text-decoration:underline}
+  .comp-card{background:#fff;border-radius:16px;padding:24px 28px;box-shadow:0 1px 4px rgba(0,0,0,.07);margin-bottom:24px}
+  .comp-name{font-size:22px;font-weight:700;color:#1e293b;margin:0 0 10px}
+  .comp-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .badge{padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600}
+  .badge-sport{background:#dbeafe;color:#1e40af}
+  .badge-mine{background:#fef3c7;color:#92400e;margin-left:6px}
+  .meta-chip{background:#f1f5f9;color:#475569;padding:3px 10px;border-radius:20px;font-size:12px}
+  .group-block{margin-bottom:28px}
+  .group-title{font-size:17px;font-weight:700;color:#1e293b;margin:0 0 12px;display:flex;align-items:center;gap:8px}
+  .team-count{font-weight:400}
+  .table-wrap{background:#fff;border-radius:12px;overflow:auto;box-shadow:0 1px 4px rgba(0,0,0,.07)}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th{text-align:left;padding:12px 16px;border-bottom:2px solid #f1f5f9;color:#64748b;font-size:12px;font-weight:600;text-transform:uppercase}
+  td{padding:11px 16px;border-bottom:1px solid #f8fafc;vertical-align:middle}
+  tr:last-child td{border-bottom:none}
+  .fw600{font-weight:600;color:#1e293b}
+  .text-sm{font-size:12px}.text-gray{color:#94a3b8}
+  .points{color:#0f4c81;font-size:15px}
+  .highlight-row{background:#fffbeb}
+  .highlight-row td{border-bottom-color:#fef3c7}
+  .empty-state{background:#fff;border-radius:16px;padding:32px;text-align:center;color:#94a3b8;font-size:14px;box-shadow:0 1px 4px rgba(0,0,0,.07)}
+</style>

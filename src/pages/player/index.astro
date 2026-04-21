@@ -1,0 +1,146 @@
+---
+import PlayerLayout from '@/layouts/PlayerLayout.astro';
+import { queryFirst, queryAll } from '@/lib/db';
+
+if (!Astro.locals.user) return Astro.redirect('/login');
+const user = Astro.locals.user;
+if (!['PLAYER', 'SUPERADMIN'].includes(user.role)) return Astro.redirect('/login');
+
+const db = (Astro.locals as any).runtime?.env?.DB;
+
+const player = await queryFirst<any>(db, 'SELECT * FROM players WHERE user_id=?', [user.id]);
+
+let stats = { prezente: 0, medieEvaluare: 0, meciuriJucate: 0 };
+let recentMatches: any[] = [];
+let nextTraining: any = null;
+
+if (player) {
+  const today = new Date().toISOString().slice(0, 10);
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+  const prezenteRow = await queryFirst<any>(db,
+    `SELECT COUNT(*) AS cnt FROM attendance WHERE player_id=? AND status='PRESENT' AND date >= ?`,
+    [player.id, thirtyDaysAgo]
+  );
+  stats.prezente = prezenteRow?.cnt ?? 0;
+
+  const evalRow = await queryFirst<any>(db,
+    `SELECT AVG(pes.score) AS avg_score FROM player_evaluation_scores pes
+     JOIN player_evaluations pe ON pe.id=pes.evaluation_id WHERE pe.player_id=?`,
+    [player.id]
+  );
+  stats.medieEvaluare = evalRow?.avg_score ? Number(evalRow.avg_score).toFixed(1) : 0;
+
+  const meciuriRow = await queryFirst<any>(db,
+    `SELECT COUNT(*) AS cnt FROM match_selections WHERE player_id=?`,
+    [player.id]
+  );
+  stats.meciuriJucate = meciuriRow?.cnt ?? 0;
+
+  recentMatches = await queryAll<any>(db,
+    `SELECT m.opponent_name, m.match_date, m.competition, m.score_home, m.score_away, m.is_home, ms.position_played
+     FROM match_selections ms JOIN matches m ON m.id=ms.match_id
+     WHERE ms.player_id=? ORDER BY m.match_date DESC LIMIT 3`,
+    [player.id]
+  );
+
+  nextTraining = await queryFirst<any>(db,
+    `SELECT t.training_date, t.start_time, t.location
+     FROM attendance a JOIN trainings t ON t.id=a.training_id
+     WHERE a.player_id=? AND t.training_date >= date('now')
+     ORDER BY t.training_date ASC LIMIT 1`,
+    [player.id]
+  );
+}
+
+const legitBadge: Record<string, string> = {
+  LEGITIMAT: 'badge-green',
+  NELEGITIMAT: 'badge-red',
+  IN_ASTEPTARE: 'badge-yellow',
+};
+---
+
+<PlayerLayout title="Dashboard" user={user}>
+  {!player ? (
+    <div class="card" style="text-align:center;padding:48px 24px">
+      <div style="font-size:48px;margin-bottom:16px">⚠️</div>
+      <h2 style="color:#1e293b;margin-bottom:8px">Cont neconectat la un profil de jucător</h2>
+      <p style="color:#64748b">Contactează administratorul clubului pentru a-ți lega contul de un profil de jucător.</p>
+    </div>
+  ) : (
+    <div>
+      <div style="margin-bottom:24px">
+        <h1 style="font-size:22px;font-weight:700;color:#1e293b">
+          Bun venit, {player.first_name} {player.last_name}!
+        </h1>
+        <p style="color:#64748b;font-size:14px;margin-top:4px">
+          Sport: {player.sport_code ?? '—'} · Poziție: {player.position ?? '—'}
+        </p>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:24px">
+        <div class="stat-card">
+          <div class="stat-value">{stats.prezente}</div>
+          <div class="stat-label">Prezențe (ultimele 30 zile)</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">{stats.medieEvaluare || '—'}</div>
+          <div class="stat-label">Medie evaluare</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">{stats.meciuriJucate}</div>
+          <div class="stat-label">Meciuri jucate</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">
+            <span class={`badge ${legitBadge[player.legitimation_status] ?? 'badge-gray'}`}>
+              {player.legitimation_status ?? 'NECUNOSCUT'}
+            </span>
+          </div>
+          <div class="stat-label">Status legitimare</div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Meciuri recente</span>
+          </div>
+          {recentMatches.length === 0 ? (
+            <p style="color:#94a3b8;font-size:14px">Nicio selecție înregistrată.</p>
+          ) : (
+            <table class="table">
+              <thead>
+                <tr><th>Adversar</th><th>Dată</th><th>Scor</th></tr>
+              </thead>
+              <tbody>
+                {recentMatches.map(m => (
+                  <tr>
+                    <td>{m.is_home ? 'vs' : '@'} {m.opponent_name}</td>
+                    <td>{m.match_date}</td>
+                    <td>{m.score_home != null ? `${m.score_home}-${m.score_away}` : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Următorul antrenament</span>
+          </div>
+          {!nextTraining ? (
+            <p style="color:#94a3b8;font-size:14px">Niciun antrenament programat.</p>
+          ) : (
+            <div>
+              <div style="font-size:20px;font-weight:700;color:#1e293b;margin-bottom:8px">{nextTraining.training_date}</div>
+              <div style="color:#64748b;font-size:14px">🕐 {nextTraining.start_time ?? '—'}</div>
+              <div style="color:#64748b;font-size:14px;margin-top:4px">📍 {nextTraining.location ?? '—'}</div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )}
+</PlayerLayout>
