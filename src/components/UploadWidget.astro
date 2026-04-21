@@ -1,0 +1,88 @@
+---
+interface Props {
+  folder: string;          // e.g. 'documents', 'photos', 'reports'
+  accept?: string;         // e.g. '.pdf,.jpg,.png'
+  label?: string;
+  onUploadCallback?: string; // JS function name to call with {key, url, size, type}
+}
+const { folder, accept = '.pdf,.jpg,.png,.webp', label = 'Încarcă fișier', onUploadCallback } = Astro.props;
+const uid = `uw-${Math.random().toString(36).slice(2,8)}`;
+---
+
+<div class="upload-widget" id={uid}>
+  <label class="upload-label">
+    <input type="file" class="upload-input" accept={accept} data-folder={folder} />
+    <span class="upload-btn">
+      <span class="upload-icon">📎</span>
+      <span class="upload-text">{label}</span>
+    </span>
+  </label>
+  <div class="upload-progress hidden">
+    <div class="upload-bar"><div class="upload-fill"></div></div>
+    <span class="upload-status">Se încarcă...</span>
+  </div>
+  <div class="upload-result hidden"></div>
+</div>
+
+<style>
+  .upload-widget{display:inline-block}
+  .upload-label{display:inline-block;cursor:pointer}
+  .upload-input{display:none}
+  .upload-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;background:#f1f5f9;border:1px dashed #94a3b8;border-radius:8px;font-size:13px;color:#475569;transition:background .15s;cursor:pointer}
+  .upload-btn:hover{background:#e2e8f0;border-color:#64748b}
+  .upload-progress{margin-top:8px}
+  .upload-bar{height:4px;background:#e2e8f0;border-radius:2px;overflow:hidden;margin-bottom:4px}
+  .upload-fill{height:100%;background:#3b82f6;width:0%;transition:width .2s}
+  .upload-status{font-size:12px;color:#64748b}
+  .upload-result{margin-top:8px;font-size:12px}
+  .upload-result.success{color:#16a34a}
+  .upload-result.error{color:#dc2626}
+  .hidden{display:none!important}
+</style>
+
+<script define:vars={{ uid, onUploadCallback }}>
+const widget = document.getElementById(uid);
+const input = widget.querySelector('.upload-input');
+const progress = widget.querySelector('.upload-progress');
+const fill = widget.querySelector('.upload-fill');
+const statusEl = widget.querySelector('.upload-status');
+const resultEl = widget.querySelector('.upload-result');
+
+input.addEventListener('change', async () => {
+  const file = input.files?.[0];
+  if (!file) return;
+
+  const folder = input.dataset.folder;
+  const form = new FormData();
+  form.append('file', file);
+  form.append('folder', folder);
+
+  progress.classList.remove('hidden');
+  resultEl.classList.add('hidden');
+  fill.style.width = '30%';
+
+  try {
+    const res = await fetch('/api/admin/upload', { method: 'POST', body: form });
+    fill.style.width = '100%';
+    const data = await res.json();
+
+    if (!res.ok) {
+      resultEl.className = 'upload-result error';
+      resultEl.textContent = data.error ?? 'Eroare la încărcare';
+    } else {
+      resultEl.className = 'upload-result success';
+      resultEl.textContent = `✓ ${file.name} (${(file.size/1024).toFixed(0)} KB)`;
+      if (onUploadCallback && window[onUploadCallback]) {
+        window[onUploadCallback](data);
+      }
+    }
+  } catch {
+    resultEl.className = 'upload-result error';
+    resultEl.textContent = 'Eroare de rețea';
+  }
+
+  resultEl.classList.remove('hidden');
+  progress.classList.add('hidden');
+  input.value = '';
+});
+</script>
