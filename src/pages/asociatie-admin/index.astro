@@ -1,0 +1,92 @@
+---
+import AsociatieLayout from '@/layouts/AsociatieLayout.astro';
+if (!Astro.locals.user) return Astro.redirect('/login');
+const user = Astro.locals.user;
+if (!['ASSOCIATION_ADMIN','FEDERATION_ADMIN','SUPERADMIN'].includes(user.role)) return Astro.redirect('/login');
+const db = (Astro.locals as any).runtime?.env?.DB;
+
+import { queryFirst, queryAll } from '@/lib/db';
+
+const assoc = await queryFirst<any>(db, 'SELECT * FROM associations WHERE id=?', [user.association_id]);
+
+const [clubs, players, legitimari, transferuri] = await Promise.all([
+  queryFirst<any>(db, 'SELECT COUNT(*) AS cnt FROM clubs WHERE association_id=? AND is_active=1', [user.association_id]),
+  queryFirst<any>(db, 'SELECT COUNT(*) AS cnt FROM players p JOIN clubs c ON c.id=p.club_id WHERE c.association_id=?', [user.association_id]),
+  queryFirst<any>(db, 'SELECT COUNT(*) AS cnt FROM player_legitimations pl JOIN clubs c ON c.id=pl.club_id WHERE c.association_id=? AND pl.status="ACTIVE"', [user.association_id]),
+  queryFirst<any>(db, 'SELECT COUNT(*) AS cnt FROM player_transfers pt JOIN clubs c ON c.id=pt.to_club_id WHERE c.association_id=? AND pt.status="PENDING"', [user.association_id]),
+]);
+
+const recentClubs = await queryAll<any>(db,
+  `SELECT c.*, COUNT(DISTINCT p.id) AS player_count FROM clubs c
+   LEFT JOIN players p ON p.club_id=c.id
+   WHERE c.association_id=? GROUP BY c.id ORDER BY c.rowid DESC LIMIT 5`,
+  [user.association_id]);
+---
+
+<AsociatieLayout title={`Dashboard — ${assoc?.name ?? 'Asociație'}`} user={{ ...user, association_name: assoc?.name }}>
+
+  <div style="margin-bottom:24px">
+    <h1 style="font-size:22px;font-weight:700;color:#1e293b">Dashboard Asociație</h1>
+    <p style="font-size:13px;color:#64748b;margin-top:2px">
+      Bun venit, {user.first_name ?? user.email} — {assoc?.name ?? 'Asociație'}
+    </p>
+  </div>
+
+  {assoc?.sport_code && (
+    <div class="alert alert-warning" style="margin-bottom:20px">
+      <strong>Sport:</strong> {assoc.sport_code === 'BASEBALL5' ? 'Baseball5' : assoc.sport_code === 'SOFTBALL' ? 'Softball' : assoc.sport_code}
+      {assoc.county ? ` · Județ: ${assoc.county}` : ''}
+    </div>
+  )}
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:24px">
+    <div class="stat-card">
+      <div class="stat-value">{clubs?.cnt ?? 0}</div>
+      <div class="stat-label">Cluburi active</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">{players?.cnt ?? 0}</div>
+      <div class="stat-label">Jucători înregistrați</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" style="color:#166534">{legitimari?.cnt ?? 0}</div>
+      <div class="stat-label">Legitimări active</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" style="color:#92400e">{transferuri?.cnt ?? 0}</div>
+      <div class="stat-label">Transferuri pending</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">Cluburi recente</span>
+      <a href="/asociatie-admin/cluburi" class="btn btn-outline btn-sm">Vezi toate →</a>
+    </div>
+    {recentClubs.length === 0 ? (
+      <p style="color:#64748b;font-size:14px;text-align:center;padding:20px 0">Nu există cluburi înregistrate în această asociație.</p>
+    ) : (
+      <table class="table">
+        <thead>
+          <tr><th>Club</th><th>Sport</th><th>Contact</th><th style="text-align:center">Jucători</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+          {recentClubs.map((c: any) => (
+            <tr>
+              <td style="font-weight:500">{c.name}</td>
+              <td><span class="badge badge-blue">{c.sport_code}</span></td>
+              <td style="font-size:12px;color:#64748b">{c.contact_email ?? '—'}</td>
+              <td style="text-align:center;font-weight:600">{c.player_count}</td>
+              <td>
+                <span class={`badge ${c.is_active ? 'badge-green' : 'badge-gray'}`}>
+                  {c.is_active ? 'Activ' : 'Inactiv'}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )}
+  </div>
+
+</AsociatieLayout>

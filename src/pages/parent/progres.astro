@@ -1,0 +1,150 @@
+---
+import ParentLayout from '@/layouts/ParentLayout.astro';
+import { queryFirst, queryAll } from '@/lib/db';
+
+if (!Astro.locals.user) return Astro.redirect('/login');
+const user = Astro.locals.user;
+if (!['PARENT', 'SUPERADMIN'].includes(user.role)) return Astro.redirect('/login');
+
+const db = (Astro.locals as any).runtime?.env?.DB;
+
+const child = await queryFirst<any>(db, 'SELECT * FROM players WHERE parent_user_id=?', [user.id]);
+
+let evaluations: any[] = [];
+let monthlyAttendance: any[] = [];
+
+if (child) {
+  evaluations = await queryAll<any>(db,
+    `SELECT pe.id, pe.eval_date, pe.notes,
+            ROUND(AVG(pes.score), 1) AS avg_score,
+            COUNT(pes.id) AS attr_count
+     FROM player_evaluations pe
+     LEFT JOIN player_evaluation_scores pes ON pes.evaluation_id=pe.id
+     WHERE pe.player_id=?
+     GROUP BY pe.id
+     ORDER BY pe.eval_date DESC`,
+    [child.id]
+  );
+
+  monthlyAttendance = await queryAll<any>(db,
+    `SELECT strftime('%Y-%m', COALESCE(t.training_date, m.match_date, a.date)) AS month,
+            COUNT(*) AS total,
+            SUM(CASE WHEN a.status='PRESENT' THEN 1 ELSE 0 END) AS prezent
+     FROM attendance a
+     LEFT JOIN trainings t ON t.id=a.training_id
+     LEFT JOIN matches m ON m.id=a.match_id
+     WHERE a.player_id=?
+       AND COALESCE(t.training_date, m.match_date, a.date) >= date('now', '-6 months')
+     GROUP BY month
+     ORDER BY month DESC`,
+    [child.id]
+  );
+}
+
+const childName = child ? `${child.first_name} ${child.last_name}` : undefined;
+
+const monthNames: Record<string, string> = {
+  '01': 'Ianuarie', '02': 'Februarie', '03': 'Martie', '04': 'Aprilie',
+  '05': 'Mai', '06': 'Iunie', '07': 'Iulie', '08': 'August',
+  '09': 'Septembrie', '10': 'Octombrie', '11': 'Noiembrie', '12': 'Decembrie',
+};
+
+function formatMonth(ym: string) {
+  const [year, month] = ym.split('-');
+  return `${monthNames[month] ?? month} ${year}`;
+}
+---
+
+<ParentLayout title="Progres" user={user} childName={childName}>
+  {!child ? (
+    <div class="card" style="text-align:center;padding:48px 24px">
+      <div style="font-size:48px;margin-bottom:16px">⚠️</div>
+      <h2 style="color:#1e293b;margin-bottom:8px">Cont neconectat la un profil de jucător</h2>
+      <p style="color:#64748b">Contactează administratorul clubului pentru a-ți lega contul de profilul copilului.</p>
+    </div>
+  ) : (
+    <div style="display:flex;flex-direction:column;gap:24px">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Prezență lunară (ultimele 6 luni)</span>
+        </div>
+        {monthlyAttendance.length === 0 ? (
+          <p style="color:#94a3b8;font-size:14px">Nicio dată de prezență disponibilă.</p>
+        ) : (
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Lună</th>
+                <th>Activități</th>
+                <th>Prezențe</th>
+                <th>Absențe</th>
+                <th>Rată</th>
+              </tr>
+            </thead>
+            <tbody>
+              {monthlyAttendance.map(row => {
+                const pct = row.total > 0 ? Math.round((row.prezent / row.total) * 100) : 0;
+                return (
+                  <tr>
+                    <td style="font-weight:500">{formatMonth(row.month)}</td>
+                    <td>{row.total}</td>
+                    <td style="color:#166534;font-weight:500">{row.prezent}</td>
+                    <td style="color:#991b1b">{row.total - row.prezent}</td>
+                    <td>
+                      <div style="display:flex;align-items:center;gap:8px">
+                        <div style="flex:1;background:#e2e8f0;border-radius:4px;height:6px;overflow:hidden;min-width:60px">
+                          <div style={`width:${pct}%;background:${pct >= 75 ? '#10b981' : pct >= 50 ? '#f59e0b' : '#ef4444'};height:100%`}></div>
+                        </div>
+                        <span style="font-size:12px;font-weight:600;color:#1e293b;min-width:32px">{pct}%</span>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Evoluție evaluări</span>
+        </div>
+        {evaluations.length === 0 ? (
+          <p style="color:#94a3b8;font-size:14px">Nicio evaluare înregistrată.</p>
+        ) : (
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Data</th>
+                <th>Scor mediu</th>
+                <th>Atribute evaluate</th>
+                <th>Note</th>
+              </tr>
+            </thead>
+            <tbody>
+              {evaluations.map(ev => {
+                const score = Number(ev.avg_score ?? 0);
+                return (
+                  <tr>
+                    <td style="font-weight:500">{ev.eval_date}</td>
+                    <td>
+                      <div style="display:flex;align-items:center;gap:8px">
+                        <div style="flex:1;background:#e2e8f0;border-radius:4px;height:6px;overflow:hidden;min-width:60px">
+                          <div style={`width:${Math.min(100, score * 10)}%;background:#10b981;height:100%`}></div>
+                        </div>
+                        <span style="font-size:13px;font-weight:600;color:#1e293b">{score}/10</span>
+                      </div>
+                    </td>
+                    <td>{ev.attr_count ?? 0}</td>
+                    <td style="color:#64748b;font-size:13px">{ev.notes ?? '—'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  )}
+</ParentLayout>

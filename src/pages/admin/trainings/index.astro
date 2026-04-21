@@ -1,0 +1,184 @@
+---
+import AdminLayout from '@/layouts/AdminLayout.astro';
+if (!Astro.locals.user) return Astro.redirect('/login');
+const user = Astro.locals.user;
+const env  = (Astro.locals as any).runtime?.env;
+import { queryAll } from '@/lib/db';
+import { getClubSportConfig } from '@/lib/sport-config';
+
+const [sport, trainings, teams] = await Promise.all([
+  getClubSportConfig(env.DB, user.club_id!),
+  queryAll<any>(env.DB,
+    `SELECT tr.*, t.name AS team_name FROM trainings tr
+     JOIN teams t ON t.id = tr.team_id
+     WHERE tr.club_id = ? ORDER BY tr.start_time DESC LIMIT 60`,
+    [user.club_id]),
+  queryAll<any>(env.DB,
+    `SELECT id, name FROM teams WHERE club_id=? AND is_active=1 ORDER BY name`,
+    [user.club_id]),
+]);
+
+const statusLabel: Record<string,string> = { SCHEDULED:'Planificat', COMPLETED:'Finalizat', CANCELLED:'Anulat' };
+---
+
+<AdminLayout title="Antrenamente" user={user} sportCode={sport?.code} sportIcon={sport?.icon}>
+
+  <div class="toolbar">
+    <div class="filters">
+      <select id="filter-status" onchange="filterRows()">
+        <option value="">Toate statusurile</option>
+        <option value="SCHEDULED">Planificate</option>
+        <option value="COMPLETED">Finalizate</option>
+        <option value="CANCELLED">Anulate</option>
+      </select>
+      <select id="filter-team" onchange="filterRows()">
+        <option value="">Toate echipele</option>
+        {teams.map(t => <option value={t.name}>{t.name}</option>)}
+      </select>
+    </div>
+    <button class="btn-primary" onclick="openModal()">+ Antrenament nou</button>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>Titlu</th><th>Echipă</th><th>Data / Oră</th><th>Locație</th><th>Status</th><th>Acțiuni</th>
+      </tr></thead>
+      <tbody id="tbody">
+        {trainings.map(tr => (
+          <tr data-status={tr.status} data-team={tr.team_name}>
+            <td class="fw600">{tr.title}</td>
+            <td>{tr.team_name}</td>
+            <td>{tr.start_time?.slice(0,16).replace('T',' ')}</td>
+            <td>{tr.location ?? '—'}</td>
+            <td><span class={`badge badge--${(tr.status||'SCHEDULED').toLowerCase()}`}>{statusLabel[tr.status] ?? tr.status}</span></td>
+            <td>
+              <button class="btn-icon" onclick={`editTraining('${tr.id}')`}>✏️</button>
+              <a class="btn-icon" href={`/admin/attendance?training=${tr.id}`} title="Prezență">✅</a>
+              <button class="btn-icon" onclick={`deleteTraining('${tr.id}')`}>🗑️</button>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+
+  <div id="modal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-head">
+        <h2 id="modal-title">Antrenament nou</h2>
+        <button onclick="closeModal()" class="btn-close">×</button>
+      </div>
+      <form id="tr-form" class="modal-body">
+        <input type="hidden" id="tr-id" />
+        <div class="form-group"><label>Titlu *</label><input id="f-title" required placeholder="Antrenament tehnic" /></div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Echipă *</label>
+            <select id="f-team" required>
+              <option value="">Selectează</option>
+              {teams.map(t => <option value={t.id}>{t.name}</option>)}
+            </select>
+          </div>
+          <div class="form-group"><label>Status</label>
+            <select id="f-status">
+              <option value="SCHEDULED">Planificat</option>
+              <option value="COMPLETED">Finalizat</option>
+              <option value="CANCELLED">Anulat</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Start *</label><input id="f-start" type="datetime-local" required /></div>
+          <div class="form-group"><label>Sfârșit</label><input id="f-end" type="datetime-local" /></div>
+        </div>
+        <div class="form-group"><label>Locație</label><input id="f-location" placeholder="Teren central" /></div>
+        <div class="form-group"><label>Note</label><textarea id="f-notes" rows="2" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:8px;font-family:inherit"></textarea></div>
+        <div class="modal-footer">
+          <button type="button" onclick="closeModal()" class="btn-secondary">Anulează</button>
+          <button type="submit" class="btn-primary">Salvează</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</AdminLayout>
+
+<style>
+  .toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;gap:12px}
+  .filters{display:flex;gap:10px}
+  .filters select{padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:13px;font-family:inherit}
+  .table-wrap{background:#fff;border-radius:12px;overflow:auto;box-shadow:0 1px 4px rgba(0,0,0,.07)}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th{text-align:left;padding:12px 16px;border-bottom:2px solid #f1f5f9;color:#64748b;font-size:12px;font-weight:600;text-transform:uppercase}
+  td{padding:11px 16px;border-bottom:1px solid #f8fafc}
+  tr:last-child td{border-bottom:none}
+  .fw600{font-weight:600;color:#1e293b}
+  .badge{padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;text-transform:uppercase}
+  .badge--scheduled{background:#dbeafe;color:#1e40af}
+  .badge--completed{background:#d1fae5;color:#065f46}
+  .badge--cancelled{background:#fee2e2;color:#991b1b}
+  .btn-icon{background:none;border:none;cursor:pointer;font-size:15px;padding:3px 5px;border-radius:4px;text-decoration:none}
+  .btn-icon:hover{background:#f1f5f9}
+  .btn-primary{background:#0f4c81;color:#fff;border:none;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;font-family:inherit}
+  .btn-secondary{background:#f1f5f9;color:#374151;border:none;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;font-family:inherit}
+  .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:flex;align-items:center;justify-content:center;padding:16px}
+  .modal-overlay.hidden{display:none}
+  .modal{background:#fff;border-radius:16px;width:100%;max-width:520px;max-height:90vh;overflow-y:auto}
+  .modal-head{display:flex;justify-content:space-between;align-items:center;padding:20px 24px;border-bottom:1px solid #f1f5f9}
+  .modal-head h2{font-size:18px;color:#1e293b}
+  .btn-close{background:none;border:none;font-size:22px;cursor:pointer;color:#64748b}
+  .modal-body{padding:24px}
+  .form-row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .form-group{margin-bottom:16px}
+  .form-group label{display:block;font-size:13px;font-weight:500;color:#374151;margin-bottom:6px}
+  .form-group input,.form-group select{width:100%;padding:9px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;font-family:inherit}
+  .modal-footer{display:flex;justify-content:flex-end;gap:10px;padding-top:8px}
+</style>
+
+<script>
+  function filterRows() {
+    const s = (document.getElementById('filter-status') as HTMLSelectElement).value;
+    const t = (document.getElementById('filter-team') as HTMLSelectElement).value;
+    document.querySelectorAll<HTMLTableRowElement>('#tbody tr').forEach(row => {
+      const matchS = !s || row.dataset.status === s;
+      const matchT = !t || row.dataset.team === t;
+      row.style.display = matchS && matchT ? '' : 'none';
+    });
+  }
+  let editingId: string | null = null;
+  function openModal() { editingId=null; (document.getElementById('modal-title') as HTMLElement).textContent='Antrenament nou'; (document.getElementById('tr-form') as HTMLFormElement).reset(); (document.getElementById('modal') as HTMLElement).classList.remove('hidden'); }
+  function closeModal() { (document.getElementById('modal') as HTMLElement).classList.add('hidden'); }
+  async function editTraining(id: string) {
+    const r = await fetch(`/api/admin/trainings/${id}`); if(!r.ok) return;
+    const t = await r.json(); editingId = id;
+    (document.getElementById('modal-title') as HTMLElement).textContent='Editează antrenament';
+    (document.getElementById('f-title') as HTMLInputElement).value = t.title??'';
+    (document.getElementById('f-team') as HTMLSelectElement).value = t.team_id??'';
+    (document.getElementById('f-status') as HTMLSelectElement).value = t.status??'SCHEDULED';
+    (document.getElementById('f-start') as HTMLInputElement).value = t.start_time?.slice(0,16)??'';
+    (document.getElementById('f-end') as HTMLInputElement).value = t.end_time?.slice(0,16)??'';
+    (document.getElementById('f-location') as HTMLInputElement).value = t.location??'';
+    (document.getElementById('f-notes') as HTMLTextAreaElement).value = t.notes??'';
+    (document.getElementById('modal') as HTMLElement).classList.remove('hidden');
+  }
+  async function deleteTraining(id: string) {
+    if(!confirm('Anulezi antrenamentul?')) return;
+    const r = await fetch(`/api/admin/trainings/${id}`, {method:'DELETE'});
+    if(r.ok) location.reload();
+  }
+  document.getElementById('tr-form')?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const body = {
+      title:     (document.getElementById('f-title') as HTMLInputElement).value,
+      team_id:   (document.getElementById('f-team') as HTMLSelectElement).value,
+      status:    (document.getElementById('f-status') as HTMLSelectElement).value,
+      start_time:(document.getElementById('f-start') as HTMLInputElement).value,
+      end_time:  (document.getElementById('f-end') as HTMLInputElement).value || null,
+      location:  (document.getElementById('f-location') as HTMLInputElement).value || null,
+      notes:     (document.getElementById('f-notes') as HTMLTextAreaElement).value || null,
+    };
+    const url = editingId ? `/api/admin/trainings/${editingId}` : '/api/admin/trainings';
+    const r = await fetch(url, { method: editingId?'PUT':'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+    if(r.ok) { closeModal(); location.reload(); } else { const e2=await r.json(); alert(e2.error??'Eroare'); }
+  });
+</script>

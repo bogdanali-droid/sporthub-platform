@@ -1,0 +1,98 @@
+---
+if (Astro.locals.user) return Astro.redirect('/admin');
+
+let error = '';
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const email = String(form.get('email') ?? '').trim().toLowerCase();
+  const password = String(form.get('password') ?? '');
+  const env = (Astro.locals as any).runtime?.env;
+
+  if (email && password && env) {
+    const { login } = await import('@/lib/auth');
+    const result = await login(env.DB, env.SESSION_KV, email, password, Astro.locals.clientIP);
+    if (result) {
+      Astro.cookies.set('session', result.token, {
+        path: '/', httpOnly: true, secure: true, sameSite: 'lax',
+        maxAge: 7 * 24 * 3600,
+      });
+      return Astro.redirect('/admin');
+    }
+    error = 'Email sau parolă incorectă.';
+  } else {
+    error = 'Completează toate câmpurile.';
+  }
+}
+---
+
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Autentificare — SportHub</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', sans-serif;
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, #0a1929 0%, #0f4c81 100%);
+    }
+    .card {
+      background: #fff; border-radius: 16px; padding: 40px;
+      width: 100%; max-width: 400px; box-shadow: 0 20px 60px rgba(0,0,0,.3);
+    }
+    .logo { text-align: center; margin-bottom: 28px; }
+    .logo .icon { font-size: 40px; display: block; }
+    .logo .brand { font-size: 24px; font-weight: 700; color: #0f4c81; margin-top: 8px; }
+    .logo .tagline { font-size: 13px; color: #64748b; margin-top: 4px; }
+    label { display: block; font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 6px; }
+    input {
+      width: 100%; padding: 10px 14px; border: 1px solid #d1d5db; border-radius: 8px;
+      font-size: 14px; font-family: inherit; margin-bottom: 16px; transition: border .2s;
+    }
+    input:focus { outline: none; border-color: #0f4c81; box-shadow: 0 0 0 3px rgba(15,76,129,.15); }
+    .btn {
+      width: 100%; padding: 12px; background: #0f4c81; color: #fff;
+      border: none; border-radius: 8px; font-size: 15px; font-weight: 600;
+      cursor: pointer; font-family: inherit; transition: background .2s;
+    }
+    .btn:hover { background: #1565c0; }
+    .error {
+      background: #fef2f2; border: 1px solid #fca5a5; color: #dc2626;
+      padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 16px;
+    }
+    .forgot { text-align: center; margin-top: 16px; font-size: 13px; }
+    .forgot a { color: #0f4c81; text-decoration: none; }
+    .footer-text { text-align: center; margin-top: 24px; font-size: 12px; color: #9ca3af; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">
+      <span class="icon">🏟️</span>
+      <div class="brand">SportHub</div>
+      <div class="tagline">Platforma multisport pentru Romania</div>
+    </div>
+
+    {error && <div class="error">{error}</div>}
+
+    <form method="POST">
+      <label for="email">Email</label>
+      <input id="email" name="email" type="email" placeholder="admin@club.ro" required autocomplete="email" />
+
+      <label for="password">Parolă</label>
+      <input id="password" name="password" type="password" placeholder="••••••••" required autocomplete="current-password" />
+
+      <button class="btn" type="submit">Intră în cont</button>
+    </form>
+
+    <div class="forgot">
+      <a href="/forgot-password">Am uitat parola</a>
+    </div>
+
+    <div class="footer-text">© 2026 SportHub Romania</div>
+  </div>
+</body>
+</html>

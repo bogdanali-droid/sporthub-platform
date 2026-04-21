@@ -1,0 +1,162 @@
+---
+import FederatieLayout from '@/layouts/FederatieLayout.astro';
+if (!Astro.locals.user) return Astro.redirect('/login/federatie');
+
+const user = Astro.locals.user;
+const db = (Astro.locals as any).runtime?.env?.DB;
+
+import { queryAll } from '@/lib/db';
+
+const filterStatus = Astro.url.searchParams.get('status') ?? '';
+const filterSport  = Astro.url.searchParams.get('sport') ?? '';
+const msg = Astro.url.searchParams.get('msg');
+const err = Astro.url.searchParams.get('err');
+
+let whereClause = 'WHERE 1=1';
+const params: any[] = [];
+if (filterStatus) { whereClause += ' AND pl.status = ?'; params.push(filterStatus); }
+if (filterSport)  { whereClause += ' AND pl.sport_code = ?'; params.push(filterSport); }
+
+const legitimari = await queryAll<any>(db,
+  `SELECT pl.*, p.first_name, p.last_name, p.birth_date, c.name AS club_name
+   FROM player_legitimations pl
+   JOIN players p ON p.id = pl.player_id
+   JOIN clubs c ON c.id = pl.club_id
+   ${whereClause}
+   ORDER BY pl.created_at DESC LIMIT 100`, params);
+
+const statusBadge: Record<string,string> = {
+  ACTIVE:'badge-green', PENDING:'badge-yellow', SUSPENDED:'badge-red', EXPIRED:'badge-gray', CANCELLED:'badge-gray'
+};
+const statusLabel: Record<string,string> = {
+  ACTIVE:'Activ', PENDING:'Pending', SUSPENDED:'Suspendat', EXPIRED:'Expirat', CANCELLED:'Anulat'
+};
+---
+
+<FederatieLayout title="Legitimări CCLTC" user={user} section="CCLTC">
+
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+    <div>
+      <h1 style="font-size:20px;font-weight:700;color:#1e293b">Registru Legitimări</h1>
+      <p style="font-size:13px;color:#64748b">Gestionare legitimări CCLTC — Baseball5 &amp; Softball</p>
+    </div>
+    <button class="btn btn-gold" onclick="document.getElementById('modal-add').classList.add('open')">+ Legitimare manuală</button>
+  </div>
+
+  {msg === 'creat' && <div class="alert alert-success">Legitimarea a fost creată cu succes.</div>}
+  {err && <div class="alert alert-error">Eroare: {err}. Verifică datele și încearcă din nou.</div>}
+
+  <!-- Filtre -->
+  <form method="GET" style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+    <select name="status" class="form-select" style="width:180px" onchange="this.form.submit()">
+      <option value="">Toate statusurile</option>
+      <option value="ACTIVE" selected={filterStatus==='ACTIVE'}>Active</option>
+      <option value="PENDING" selected={filterStatus==='PENDING'}>Pending</option>
+      <option value="SUSPENDED" selected={filterStatus==='SUSPENDED'}>Suspendate</option>
+      <option value="EXPIRED" selected={filterStatus==='EXPIRED'}>Expirate</option>
+    </select>
+    <select name="sport" class="form-select" style="width:160px" onchange="this.form.submit()">
+      <option value="">Toate sporturile</option>
+      <option value="BASEBALL5" selected={filterSport==='BASEBALL5'}>Baseball5</option>
+      <option value="SOFTBALL" selected={filterSport==='SOFTBALL'}>Softball</option>
+    </select>
+  </form>
+
+  <div class="card">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Nr. legitimare</th><th>Jucător</th><th>Club</th><th>Sport</th>
+          <th>Tip înreg.</th><th>Status</th><th>Valabil până</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {legitimari.length === 0 && (
+          <tr><td colspan="8" style="text-align:center;color:#64748b;padding:24px">Nu există legitimări cu acești filteri.</td></tr>
+        )}
+        {legitimari.map((l: any) => (
+          <tr>
+            <td style="font-family:monospace;font-size:12px">{l.license_number ?? <em style="color:#94a3b8">fără nr.</em>}</td>
+            <td style="font-weight:500">{l.first_name} {l.last_name}</td>
+            <td>{l.club_name}</td>
+            <td><span class="badge badge-blue">{l.sport_code}</span></td>
+            <td><span class="badge badge-gray">{l.registration_type}</span></td>
+            <td><span class={`badge ${statusBadge[l.status] ?? 'badge-gray'}`}>{statusLabel[l.status] ?? l.status}</span></td>
+            <td style="font-size:12px;color:#64748b">{l.valid_until ?? 'nelimitată'}</td>
+            <td style="display:flex;gap:4px">
+              {l.status === 'PENDING' && (
+                <form method="POST" action="/api/federatie-admin/legitimari/approve" style="display:inline">
+                  <input type="hidden" name="id" value={l.id} />
+                  <button type="submit" class="btn btn-gold btn-sm">Aprobă</button>
+                </form>
+              )}
+              {l.status === 'ACTIVE' && (
+                <form method="POST" action="/api/federatie-admin/legitimari/suspend" style="display:inline">
+                  <input type="hidden" name="id" value={l.id} />
+                  <button type="submit" class="btn btn-outline btn-sm" onclick="return confirm('Suspendă legitimarea?')">Suspendă</button>
+                </form>
+              )}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Modal legitimare manuală -->
+  <div class="modal-overlay" id="modal-add">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">Legitimare manuală</span>
+        <button class="modal-close" onclick="document.getElementById('modal-add').classList.remove('open')">✕</button>
+      </div>
+      <form method="POST" action="/api/federatie-admin/legitimari/create">
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">Sport</label>
+            <select name="sport_code" class="form-select" required>
+              <option value="BASEBALL5">Baseball5</option>
+              <option value="SOFTBALL">Softball</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">ID Jucător (UUID)</label>
+            <input type="text" name="player_id" class="form-input" required placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">ID Club (UUID)</label>
+            <input type="text" name="club_id" class="form-input" required placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Tip înregistrare</label>
+            <select name="registration_type" class="form-select">
+              <option value="INITIAL">Inițială</option>
+              <option value="RENEWAL">Reînnoire</option>
+              <option value="TRANSFER">Transfer</option>
+              <option value="RETURN">Revenire</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Grupă de vârstă</label>
+            <select name="age_group" class="form-select">
+              <option value="OPEN">OPEN / Seniori</option>
+              <option value="U18">U18</option>
+              <option value="U15">U15</option>
+              <option value="U12">U12</option>
+              <option value="U10">U10</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Note</label>
+            <textarea name="notes" class="form-textarea" rows="2"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" onclick="document.getElementById('modal-add').classList.remove('open')">Anulează</button>
+          <button type="submit" class="btn btn-gold">Creează legitimare</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+</FederatieLayout>

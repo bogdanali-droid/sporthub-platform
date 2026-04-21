@@ -1,0 +1,136 @@
+---
+import AdminLayout from '@/layouts/AdminLayout.astro';
+if (!Astro.locals.user) return Astro.redirect('/login');
+
+const user = Astro.locals.user;
+const env  = (Astro.locals as any).runtime?.env;
+const db   = env?.DB;
+
+import { queryFirst, queryAll } from '@/lib/db';
+import { getClubSportConfig } from '@/lib/sport-config';
+
+const [sport, stats, upcomingMatches, upcomingTrainings] = await Promise.all([
+  getClubSportConfig(db, user.club_id!),
+  queryFirst<any>(db,
+    `SELECT
+       (SELECT COUNT(*) FROM players WHERE club_id=? AND status='ACTIVE') AS players,
+       (SELECT COUNT(*) FROM teams   WHERE club_id=? AND is_active=1)    AS teams,
+       (SELECT COUNT(*) FROM matches WHERE club_id=? AND status='SCHEDULED') AS matches,
+       (SELECT COALESCE(SUM(amount),0) FROM payments WHERE club_id=? AND status='PENDING') AS pending_ron`,
+    [user.club_id, user.club_id, user.club_id, user.club_id]),
+  queryAll<any>(db,
+    `SELECT m.*, t.name AS team_name FROM matches m
+     JOIN teams t ON t.id = m.team_id
+     WHERE m.club_id=? AND m.status='SCHEDULED' AND m.match_date >= date('now')
+     ORDER BY m.match_date LIMIT 5`,
+    [user.club_id]),
+  queryAll<any>(db,
+    `SELECT tr.*, t.name AS team_name FROM trainings tr
+     JOIN teams t ON t.id = tr.team_id
+     WHERE tr.club_id=? AND tr.status='SCHEDULED' AND tr.start_time >= datetime('now')
+     ORDER BY tr.start_time LIMIT 5`,
+    [user.club_id]),
+]);
+---
+
+<AdminLayout title="Dashboard" user={user} sportCode={sport?.code} sportIcon={sport?.icon}>
+  <!-- STAT CARDS -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:24px">
+    <div class="stat-card">
+      <div class="stat-icon">👥</div>
+      <div class="stat-value">{stats?.players ?? 0}</div>
+      <div class="stat-label">Jucători activi</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon">🏆</div>
+      <div class="stat-value">{stats?.teams ?? 0}</div>
+      <div class="stat-label">Echipe active</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon">⚔️</div>
+      <div class="stat-value">{stats?.matches ?? 0}</div>
+      <div class="stat-label">Meciuri planificate</div>
+    </div>
+    <div class="stat-card stat-card--warn">
+      <div class="stat-icon">💳</div>
+      <div class="stat-value">{Number(stats?.pending_ron ?? 0).toFixed(0)} RON</div>
+      <div class="stat-label">Plăți restante</div>
+    </div>
+  </div>
+
+  <!-- TWO COLUMNS -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+
+    <!-- UPCOMING TRAININGS -->
+    <div class="panel">
+      <div class="panel-head">
+        <span>🏋️ Antrenamente următoare</span>
+        <a href="/admin/trainings" class="panel-link">Vezi toate</a>
+      </div>
+      {upcomingTrainings.length === 0
+        ? <p class="empty">Niciun antrenament programat.</p>
+        : upcomingTrainings.map(t => (
+          <div class="row-item">
+            <div>
+              <div class="row-title">{t.title}</div>
+              <div class="row-sub">{t.team_name} • {t.location ?? 'Fără locație'}</div>
+            </div>
+            <div class="row-date">{t.start_time?.slice(0,16).replace('T',' ')}</div>
+          </div>
+        ))
+      }
+    </div>
+
+    <!-- UPCOMING MATCHES -->
+    <div class="panel">
+      <div class="panel-head">
+        <span>⚔️ Meciuri următoare</span>
+        <a href="/admin/matches" class="panel-link">Vezi toate</a>
+      </div>
+      {upcomingMatches.length === 0
+        ? <p class="empty">Niciun meci programat.</p>
+        : upcomingMatches.map(m => (
+          <div class="row-item">
+            <div>
+              <div class="row-title">vs {m.opponent_name}</div>
+              <div class="row-sub">{m.team_name} • {m.is_home ? '🏠 Acasă' : '✈️ Deplasare'}</div>
+            </div>
+            <div class="row-date">{m.match_date?.slice(0,10)}</div>
+          </div>
+        ))
+      }
+    </div>
+
+  </div>
+</AdminLayout>
+
+<style>
+  .stat-card {
+    background: #fff; border-radius: 12px; padding: 20px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.07); text-align: center;
+  }
+  .stat-card--warn { border-top: 3px solid #f59e0b; }
+  .stat-icon { font-size: 28px; margin-bottom: 8px; }
+  .stat-value { font-size: 28px; font-weight: 700; color: #1e293b; }
+  .stat-label { font-size: 13px; color: #64748b; margin-top: 4px; }
+
+  .panel {
+    background: #fff; border-radius: 12px; padding: 20px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.07);
+  }
+  .panel-head {
+    display: flex; justify-content: space-between; align-items: center;
+    font-weight: 600; color: #1e293b; margin-bottom: 16px; font-size: 14px;
+  }
+  .panel-link { font-size: 12px; color: #0f4c81; text-decoration: none; font-weight: 400; }
+  .panel-link:hover { text-decoration: underline; }
+  .row-item {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 0; border-bottom: 1px solid #f1f5f9;
+  }
+  .row-item:last-child { border-bottom: none; }
+  .row-title { font-size: 14px; font-weight: 500; color: #1e293b; }
+  .row-sub { font-size: 12px; color: #64748b; margin-top: 2px; }
+  .row-date { font-size: 12px; color: #94a3b8; white-space: nowrap; margin-left: 12px; }
+  .empty { font-size: 13px; color: #94a3b8; padding: 8px 0; }
+</style>

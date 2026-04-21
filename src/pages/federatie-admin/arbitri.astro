@@ -1,0 +1,157 @@
+---
+import FederatieLayout from '@/layouts/FederatieLayout.astro';
+if (!Astro.locals.user) return Astro.redirect('/login/federatie');
+const user = Astro.locals.user;
+if (!['FEDERATION_ADMIN','SUPERADMIN'].includes(user.role)) return Astro.redirect('/login/federatie');
+const db = (Astro.locals as any).runtime?.env?.DB;
+import { queryAll } from '@/lib/db';
+
+const filterGrade = Astro.url.searchParams.get('grade') ?? '';
+const filterSport = Astro.url.searchParams.get('sport') ?? '';
+const msg = Astro.url.searchParams.get('msg');
+
+let where = 'WHERE 1=1';
+const params: any[] = [];
+if (filterGrade) { where += ' AND grade = ?'; params.push(filterGrade); }
+if (filterSport) { where += ' AND sport_codes LIKE ?'; params.push(`%${filterSport}%`); }
+
+const arbitri = await queryAll<any>(db,
+  `SELECT * FROM arbitri ${where} ORDER BY last_name, first_name`, params);
+
+const gradeBadge: Record<string,string> = {
+  NATIONAL: 'badge-green', REGIONAL: 'badge-blue', LOCAL: 'badge-yellow', CANDIDATE: 'badge-gray'
+};
+const gradeLabel: Record<string,string> = {
+  NATIONAL: 'Național', REGIONAL: 'Regional', LOCAL: 'Local', CANDIDATE: 'Candidat'
+};
+---
+
+<FederatieLayout title="Arbitri" user={user} section="CCLTC">
+
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+    <div>
+      <h1 style="font-size:20px;font-weight:700;color:#1e293b">Registru Arbitri</h1>
+      <p style="font-size:13px;color:#64748b">Gestionare arbitri Baseball5 &amp; Softball</p>
+    </div>
+    <button class="btn btn-gold" onclick="document.getElementById('modal-add').classList.add('open')">+ Arbitru nou</button>
+  </div>
+
+  {msg === 'creat' && <div class="alert alert-success">Arbitrul a fost adăugat cu succes.</div>}
+
+  <form method="GET" style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+    <select name="grade" class="form-select" style="width:180px" onchange="this.form.submit()">
+      <option value="">Toate gradele</option>
+      <option value="NATIONAL" selected={filterGrade==='NATIONAL'}>Național</option>
+      <option value="REGIONAL" selected={filterGrade==='REGIONAL'}>Regional</option>
+      <option value="LOCAL" selected={filterGrade==='LOCAL'}>Local</option>
+      <option value="CANDIDATE" selected={filterGrade==='CANDIDATE'}>Candidat</option>
+    </select>
+    <select name="sport" class="form-select" style="width:160px" onchange="this.form.submit()">
+      <option value="">Toate sporturile</option>
+      <option value="BASEBALL5" selected={filterSport==='BASEBALL5'}>Baseball5</option>
+      <option value="SOFTBALL" selected={filterSport==='SOFTBALL'}>Softball</option>
+    </select>
+  </form>
+
+  <div class="card">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Nume</th><th>Email</th><th>Telefon</th><th>Grad</th><th>Sporturi</th><th>Status</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {arbitri.length === 0 && (
+          <tr><td colspan="7" style="text-align:center;color:#64748b;padding:24px">Nu există arbitri cu acești filteri.</td></tr>
+        )}
+        {arbitri.map((a: any) => {
+          let sports: string[] = [];
+          try { sports = JSON.parse(a.sport_codes ?? '[]'); } catch {}
+          return (
+            <tr>
+              <td style="font-weight:500">{a.last_name} {a.first_name}</td>
+              <td style="font-size:13px">{a.email ?? <em style="color:#94a3b8">—</em>}</td>
+              <td style="font-size:13px">{a.phone ?? <em style="color:#94a3b8">—</em>}</td>
+              <td><span class={`badge ${gradeBadge[a.grade] ?? 'badge-gray'}`}>{gradeLabel[a.grade] ?? a.grade}</span></td>
+              <td style="display:flex;gap:4px;flex-wrap:wrap">
+                {sports.map((s: string) => <span class="badge badge-blue">{s}</span>)}
+                {sports.length === 0 && <em style="color:#94a3b8;font-size:12px">—</em>}
+              </td>
+              <td>
+                <span class={`badge ${a.is_active ? 'badge-green' : 'badge-gray'}`}>
+                  {a.is_active ? 'Activ' : 'Inactiv'}
+                </span>
+              </td>
+              <td>
+                <form method="POST" action="/api/federatie-admin/arbitri/toggle" style="display:inline">
+                  <input type="hidden" name="id" value={a.id} />
+                  <input type="hidden" name="is_active" value={a.is_active ? '0' : '1'} />
+                  <button type="submit" class="btn btn-outline btn-sm">
+                    {a.is_active ? 'Dezactivează' : 'Activează'}
+                  </button>
+                </form>
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Modal adăugare arbitru -->
+  <div class="modal-overlay" id="modal-add">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">Adăugare arbitru nou</span>
+        <button class="modal-close" onclick="document.getElementById('modal-add').classList.remove('open')">✕</button>
+      </div>
+      <form method="POST" action="/api/federatie-admin/arbitri/create">
+        <div class="modal-body">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div class="form-group">
+              <label class="form-label">Prenume *</label>
+              <input type="text" name="first_name" class="form-input" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Nume *</label>
+              <input type="text" name="last_name" class="form-input" required />
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Email</label>
+            <input type="email" name="email" class="form-input" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Telefon</label>
+            <input type="text" name="phone" class="form-input" placeholder="+40..." />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Grad *</label>
+            <select name="grade" class="form-select" required>
+              <option value="CANDIDATE">Candidat</option>
+              <option value="LOCAL">Local</option>
+              <option value="REGIONAL">Regional</option>
+              <option value="NATIONAL">Național</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Sporturi</label>
+            <div style="display:flex;gap:16px;margin-top:6px">
+              <label style="display:flex;align-items:center;gap:6px;font-size:14px">
+                <input type="checkbox" name="sport_codes" value="BASEBALL5" /> Baseball5
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:14px">
+                <input type="checkbox" name="sport_codes" value="SOFTBALL" /> Softball
+              </label>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" onclick="document.getElementById('modal-add').classList.remove('open')">Anulează</button>
+          <button type="submit" class="btn btn-gold">Adaugă arbitru</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+</FederatieLayout>

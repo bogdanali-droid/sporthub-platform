@@ -1,0 +1,135 @@
+---
+import PlayerLayout from '@/layouts/PlayerLayout.astro';
+import { queryFirst, queryAll } from '@/lib/db';
+
+if (!Astro.locals.user) return Astro.redirect('/login');
+const user = Astro.locals.user;
+if (!['PLAYER', 'SUPERADMIN'].includes(user.role)) return Astro.redirect('/login');
+
+const db = (Astro.locals as any).runtime?.env?.DB;
+
+const player = await queryFirst<any>(db, 'SELECT * FROM players WHERE user_id=?', [user.id]);
+
+let evaluations: any[] = [];
+let scores: any[] = [];
+let attrAverages: Record<string, { name: string; avg: number; count: number }> = {};
+
+if (player) {
+  evaluations = await queryAll<any>(db,
+    `SELECT pe.*, u.first_name AS ev_first, u.last_name AS ev_last
+     FROM player_evaluations pe
+     LEFT JOIN users u ON u.id=pe.evaluated_by
+     WHERE pe.player_id=?
+     ORDER BY pe.eval_date DESC`,
+    [player.id]
+  );
+
+  scores = await queryAll<any>(db,
+    `SELECT pes.evaluation_id, pes.attribute_code, pes.score, sea.name_ro, sea.category
+     FROM player_evaluation_scores pes
+     JOIN player_evaluations pe ON pe.id=pes.evaluation_id
+     LEFT JOIN sport_evaluation_attributes sea ON sea.code=pes.attribute_code
+     WHERE pe.player_id=?`,
+    [player.id]
+  );
+
+  for (const s of scores) {
+    if (!attrAverages[s.attribute_code]) {
+      attrAverages[s.attribute_code] = { name: s.name_ro ?? s.attribute_code, avg: 0, count: 0 };
+    }
+    attrAverages[s.attribute_code].avg += s.score;
+    attrAverages[s.attribute_code].count += 1;
+  }
+  for (const key of Object.keys(attrAverages)) {
+    const a = attrAverages[key];
+    a.avg = a.count > 0 ? Math.round((a.avg / a.count) * 10) / 10 : 0;
+  }
+}
+
+function scoresForEval(evalId: number) {
+  return scores.filter(s => s.evaluation_id === evalId);
+}
+
+function stars(score: number) {
+  const max = 10;
+  const filled = Math.round(score);
+  return '★'.repeat(filled) + '☆'.repeat(Math.max(0, max - filled));
+}
+---
+
+<PlayerLayout title="Evaluări" user={user}>
+  {!player ? (
+    <div class="card" style="text-align:center;padding:48px 24px">
+      <div style="font-size:48px;margin-bottom:16px">⚠️</div>
+      <h2 style="color:#1e293b;margin-bottom:8px">Cont neconectat la un profil de jucător</h2>
+      <p style="color:#64748b">Contactează administratorul clubului pentru a-ți lega contul de un profil de jucător.</p>
+    </div>
+  ) : (
+    <div>
+      {Object.keys(attrAverages).length > 0 && (
+        <div class="card" style="margin-bottom:24px">
+          <div class="card-header">
+            <span class="card-title">Medii per atribut</span>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px">
+            {Object.entries(attrAverages).map(([code, a]) => (
+              <div style="background:#f8fafc;border-radius:8px;padding:12px">
+                <div style="font-size:12px;color:#64748b;margin-bottom:4px">{a.name}</div>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <div style="flex:1;background:#e2e8f0;border-radius:4px;height:6px;overflow:hidden">
+                    <div style={`width:${Math.min(100, a.avg * 10)}%;background:#3b82f6;height:100%`}></div>
+                  </div>
+                  <span style="font-size:13px;font-weight:600;color:#1e293b;min-width:28px">{a.avg}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Istoric evaluări</span>
+        </div>
+        {evaluations.length === 0 ? (
+          <p style="color:#94a3b8;font-size:14px">Nicio evaluare înregistrată.</p>
+        ) : (
+          <div style="display:flex;flex-direction:column;gap:16px">
+            {evaluations.map(ev => {
+              const evScores = scoresForEval(ev.id);
+              return (
+                <div style="border:1px solid #f1f5f9;border-radius:8px;padding:16px">
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+                    <div>
+                      <span style="font-weight:600;color:#1e293b">{ev.eval_date}</span>
+                      <span style="color:#64748b;font-size:13px;margin-left:8px">
+                        de {ev.ev_first ?? ''} {ev.ev_last ?? ''}
+                      </span>
+                    </div>
+                  </div>
+                  {ev.notes && (
+                    <p style="color:#475569;font-size:13px;margin-bottom:12px;font-style:italic">
+                      {ev.notes}
+                    </p>
+                  )}
+                  {evScores.length > 0 && (
+                    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">
+                      {evScores.map(s => (
+                        <div style="background:#f8fafc;padding:8px 10px;border-radius:6px">
+                          <div style="font-size:11px;color:#64748b">{s.name_ro ?? s.attribute_code}</div>
+                          <div style="font-size:13px;font-weight:600;color:#1e293b;margin-top:2px">
+                            {s.score}/10
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  )}
+</PlayerLayout>

@@ -1,0 +1,43 @@
+{
+  "name": "sporthub-platform",
+  "compatibility_date": "2024-09-23",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "dist/_worker.js/index.js",
+  "workers_dev": false,
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "sporthub-db",
+      "database_id": "0dd122a2-2d6c-49a6-88c4-20a8b3c47513"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "SESSION_KV",
+      "id": "4f0a00d3b0a94abfaaa16ed2be657fda",
+      "preview_id": "4f0a00d3b0a94abfaaa16ed2be657fda"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "R2",
+      "bucket_name": "sporthub-media",
+      "preview_bucket_name": "sporthub-media"
+    }
+  ],
+  "triggers": {
+    "crons": [
+      "0 * * * *",
+      "0 6 1 * *"
+    ]
+  },
+  "vars": {
+    "ENVIRONMENT": "production",
+    "APP_URL": "https://sporthub.pages.dev",
+    "CRON_SECRET": "change-me-in-cloudflare-dashboard"
+  }
+}

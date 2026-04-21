@@ -1,0 +1,120 @@
+---
+import ParentLayout from '@/layouts/ParentLayout.astro';
+import { queryFirst, queryAll } from '@/lib/db';
+
+if (!Astro.locals.user) return Astro.redirect('/login');
+const user = Astro.locals.user;
+if (!['PARENT', 'SUPERADMIN'].includes(user.role)) return Astro.redirect('/login');
+
+const db = (Astro.locals as any).runtime?.env?.DB;
+
+const child = await queryFirst<any>(db, 'SELECT * FROM players WHERE parent_user_id=?', [user.id]);
+
+let records: any[] = [];
+let stats = { total: 0, prezent: 0, antrenamente: 0, meciuri: 0 };
+
+if (child) {
+  records = await queryAll<any>(db,
+    `SELECT a.*, t.training_date, t.start_time, t.location AS train_loc,
+            m.opponent_name, m.match_date
+     FROM attendance a
+     LEFT JOIN trainings t ON t.id=a.training_id
+     LEFT JOIN matches m ON m.id=a.match_id
+     WHERE a.player_id=?
+     ORDER BY COALESCE(t.training_date, m.match_date) DESC
+     LIMIT 60`,
+    [child.id]
+  );
+
+  stats.total = records.length;
+  stats.prezent = records.filter(r => r.status === 'PRESENT').length;
+  stats.antrenamente = records.filter(r => r.type === 'TRAINING').length;
+  stats.meciuri = records.filter(r => r.type === 'MATCH').length;
+}
+
+const childName = child ? `${child.first_name} ${child.last_name}` : undefined;
+
+const statusBadge: Record<string, string> = {
+  PRESENT: 'badge-green',
+  ABSENT: 'badge-red',
+  LATE: 'badge-yellow',
+  EXCUSED: 'badge-gray',
+};
+const statusLabel: Record<string, string> = {
+  PRESENT: 'Prezent',
+  ABSENT: 'Absent',
+  LATE: 'Întârziat',
+  EXCUSED: 'Motivat',
+};
+
+const prezentaPct = stats.total > 0 ? Math.round((stats.prezent / stats.total) * 100) : 0;
+---
+
+<ParentLayout title="Prezențe" user={user} childName={childName}>
+  {!child ? (
+    <div class="card" style="text-align:center;padding:48px 24px">
+      <div style="font-size:48px;margin-bottom:16px">⚠️</div>
+      <h2 style="color:#1e293b;margin-bottom:8px">Cont neconectat la un profil de jucător</h2>
+      <p style="color:#64748b">Contactează administratorul clubului pentru a-ți lega contul de profilul copilului.</p>
+    </div>
+  ) : (
+    <div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin-bottom:24px">
+        <div class="stat-card">
+          <div class="stat-value">{prezentaPct}%</div>
+          <div class="stat-label">Prezență generală</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">{stats.prezent}</div>
+          <div class="stat-label">Prezențe totale</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">{stats.antrenamente}</div>
+          <div class="stat-label">Antrenamente</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">{stats.meciuri}</div>
+          <div class="stat-label">Meciuri</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Istoric prezențe — {child.first_name} {child.last_name}</span>
+        </div>
+        {records.length === 0 ? (
+          <p style="color:#94a3b8;font-size:14px">Nicio înregistrare de prezență.</p>
+        ) : (
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Data</th>
+                <th>Tip</th>
+                <th>Locație</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {records.map(r => (
+                <tr>
+                  <td>{r.training_date ?? r.match_date ?? r.date ?? '—'}</td>
+                  <td>
+                    <span class={`badge ${r.type === 'MATCH' ? 'badge-blue' : 'badge-gray'}`}>
+                      {r.type === 'MATCH' ? 'Meci' : 'Antrenament'}
+                    </span>
+                  </td>
+                  <td>{r.train_loc ?? (r.opponent_name ? `vs ${r.opponent_name}` : '—')}</td>
+                  <td>
+                    <span class={`badge ${statusBadge[r.status] ?? 'badge-gray'}`}>
+                      {statusLabel[r.status] ?? r.status}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  )}
+</ParentLayout>

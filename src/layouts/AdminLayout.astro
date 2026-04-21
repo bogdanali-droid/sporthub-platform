@@ -1,0 +1,169 @@
+---
+import type { SessionUser } from '@/lib/auth';
+
+interface Props {
+  title: string;
+  user?: SessionUser | null;
+  sportCode?: string | null;
+  sportIcon?: string;
+}
+
+const { title, user, sportCode, sportIcon = '🏟️' } = Astro.props;
+
+const navItems = [
+  { href: '/admin', icon: '📊', label: 'Dashboard' },
+  { href: '/admin/players', icon: '👥', label: 'Jucători' },
+  { href: '/admin/teams', icon: '🏆', label: 'Echipe' },
+  { href: '/admin/trainings', icon: '🏋️', label: 'Antrenamente' },
+  { href: '/admin/matches', icon: '⚔️', label: 'Meciuri' },
+  { href: '/admin/attendance', icon: '✅', label: 'Prezență' },
+  { href: '/admin/payments', icon: '💳', label: 'Plăți' },
+  { href: '/admin/medical', icon: '🩺', label: 'Medical' },
+  { href: '/admin/documents', icon: '📁', label: 'Documente' },
+  { href: '/admin/evaluations', icon: '⭐', label: 'Evaluări' },
+  { href: '/admin/drills', icon: '🎯', label: 'Drill-uri' },
+  { href: '/admin/federatie', icon: '🏛️', label: 'Federație' },
+  { href: '/admin/competitii', icon: '🥇', label: 'Competiții' },
+];
+
+const currentPath = Astro.url.pathname;
+---
+
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{title} — SportHub</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --sidebar-bg: #0a1929;
+      --sidebar-text: #94a3b8;
+      --sidebar-active: #ffffff;
+      --sidebar-accent: #3b82f6;
+      --topbar-bg: #ffffff;
+      --content-bg: #f1f5f9;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', sans-serif; display: flex; min-height: 100vh; background: var(--content-bg); }
+
+    /* SIDEBAR */
+    #sidebar {
+      width: 240px; min-height: 100vh; background: var(--sidebar-bg);
+      display: flex; flex-direction: column; position: fixed; top: 0; left: 0; z-index: 100;
+      transition: transform .25s ease;
+    }
+    .sidebar-logo {
+      padding: 20px 16px; border-bottom: 1px solid #1e3a5f;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .sidebar-logo .sport-icon { font-size: 24px; }
+    .sidebar-logo .brand { color: #fff; font-size: 18px; font-weight: 700; }
+    .sidebar-logo .sport-label { color: #64748b; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+
+    nav { flex: 1; padding: 12px 0; overflow-y: auto; }
+    .nav-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 16px; color: var(--sidebar-text);
+      text-decoration: none; font-size: 14px; border-radius: 6px; margin: 2px 8px;
+      transition: background .15s, color .15s;
+    }
+    .nav-item:hover { background: #1e3a5f; color: #e2e8f0; }
+    .nav-item.active { background: var(--sidebar-accent); color: #fff; }
+    .nav-icon { width: 20px; text-align: center; font-size: 16px; }
+
+    .sidebar-footer { padding: 12px 16px; border-top: 1px solid #1e3a5f; }
+    .sidebar-footer a { color: #64748b; font-size: 13px; text-decoration: none; display: block; padding: 6px 0; }
+    .sidebar-footer a:hover { color: #94a3b8; }
+
+    /* MAIN */
+    #main { margin-left: 240px; flex: 1; display: flex; flex-direction: column; min-height: 100vh; }
+
+    /* TOPBAR */
+    #topbar {
+      background: var(--topbar-bg); padding: 0 24px; height: 56px;
+      display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 1px solid #e2e8f0; position: sticky; top: 0; z-index: 90;
+    }
+    .page-title { font-size: 16px; font-weight: 600; color: #1e293b; }
+    .topbar-right { display: flex; align-items: center; gap: 12px; }
+    .user-badge {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 13px; color: #475569;
+    }
+    .user-avatar {
+      width: 32px; height: 32px; border-radius: 50%;
+      background: var(--sidebar-accent); color: #fff;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; font-weight: 600;
+    }
+
+    /* CONTENT */
+    #content { flex: 1; padding: 24px; }
+
+    /* Mobile */
+    #menu-toggle { display: none; background: none; border: none; font-size: 22px; cursor: pointer; }
+    @media (max-width: 768px) {
+      #sidebar { transform: translateX(-100%); }
+      #sidebar.open { transform: translateX(0); }
+      #main { margin-left: 0; }
+      #menu-toggle { display: block; }
+    }
+  </style>
+</head>
+<body>
+
+<aside id="sidebar">
+  <div class="sidebar-logo">
+    <span class="sport-icon">{sportIcon}</span>
+    <div>
+      <div class="brand">SportHub</div>
+      <div class="sport-label">{sportCode ?? 'Admin'}</div>
+    </div>
+  </div>
+
+  <nav>
+    {navItems.map(item => (
+      <a
+        href={item.href}
+        class={`nav-item${currentPath === item.href || (item.href !== '/admin' && currentPath.startsWith(item.href)) ? ' active' : ''}`}
+      >
+        <span class="nav-icon">{item.icon}</span>
+        {item.label}
+      </a>
+    ))}
+  </nav>
+
+  <div class="sidebar-footer">
+    <a href="/admin/settings">⚙️ Setări club</a>
+    <a href="/api/auth/logout">🚪 Deconectare</a>
+  </div>
+</aside>
+
+<div id="main">
+  <header id="topbar">
+    <div style="display:flex;align-items:center;gap:12px">
+      <button id="menu-toggle" onclick="document.getElementById('sidebar').classList.toggle('open')">☰</button>
+      <span class="page-title">{title}</span>
+    </div>
+    <div class="topbar-right">
+      {user && (
+        <div class="user-badge">
+          <div class="user-avatar">
+            {(user.first_name?.[0] ?? user.email[0]).toUpperCase()}
+          </div>
+          <span>{user.first_name ?? user.email}</span>
+        </div>
+      )}
+    </div>
+  </header>
+
+  <main id="content">
+    <slot />
+  </main>
+</div>
+
+</body>
+</html>

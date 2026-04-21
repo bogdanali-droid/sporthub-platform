@@ -1,0 +1,264 @@
+---
+import AdminLayout from '@/layouts/AdminLayout.astro';
+if (!Astro.locals.user) return Astro.redirect('/login');
+const user = Astro.locals.user;
+const env  = (Astro.locals as any).runtime?.env;
+import { queryAll } from '@/lib/db';
+import { getClubSportConfig } from '@/lib/sport-config';
+
+const [sport, players, teams] = await Promise.all([
+  getClubSportConfig(env.DB, user.club_id!),
+  queryAll<any>(env.DB,
+    `SELECT p.*, t.name AS team_name FROM players p
+     LEFT JOIN team_players tp ON tp.player_id = p.id AND tp.left_at IS NULL
+     LEFT JOIN teams t ON t.id = tp.team_id
+     WHERE p.club_id = ? ORDER BY p.last_name, p.first_name`,
+    [user.club_id]),
+  queryAll<any>(env.DB,
+    `SELECT id, name FROM teams WHERE club_id = ? AND is_active = 1 ORDER BY name`,
+    [user.club_id]),
+]);
+---
+
+<AdminLayout title="Jucători" user={user} sportCode={sport?.code} sportIcon={sport?.icon}>
+
+  <div class="toolbar">
+    <input id="search" type="search" placeholder="Caută jucător..." class="search-input" />
+    <button class="btn-primary" onclick="openModal()">+ Jucător nou</button>
+  </div>
+
+  <div class="table-wrap">
+    <table id="players-table">
+      <thead>
+        <tr>
+          <th>Nume</th>
+          <th>Poziție</th>
+          <th>Echipă</th>
+          <th>Status</th>
+          <th>Nr.</th>
+          <th>Acțiuni</th>
+        </tr>
+      </thead>
+      <tbody>
+        {players.map(p => (
+          <tr data-search={`${p.first_name} ${p.last_name} ${p.team_name ?? ''}`}>
+            <td>
+              <div class="player-name">
+                <div class="avatar">{p.first_name?.[0]}{p.last_name?.[0]}</div>
+                <div>
+                  <div class="fw600">{p.last_name} {p.first_name}</div>
+                  <div class="text-sm text-gray">{p.birth_date?.slice(0,4)}</div>
+                </div>
+              </div>
+            </td>
+            <td>{p.position ?? '—'}</td>
+            <td>{p.team_name ?? '—'}</td>
+            <td>
+              <span class={`badge badge--${(p.status ?? 'ACTIVE').toLowerCase()}`}>
+                {p.status ?? 'ACTIVE'}
+              </span>
+            </td>
+            <td style="text-align:center">{p.jersey_number ?? '—'}</td>
+            <td>
+              <button class="btn-icon" onclick={`editPlayer('${p.id}')`} title="Editează">✏️</button>
+              <button class="btn-icon" onclick={`deletePlayer('${p.id}','${p.first_name} ${p.last_name}')`} title="Șterge">🗑️</button>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- MODAL -->
+  <div id="modal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-head">
+        <h2 id="modal-title">Jucător nou</h2>
+        <button onclick="closeModal()" class="btn-close">×</button>
+      </div>
+      <form id="player-form" class="modal-body">
+        <input type="hidden" id="player-id" />
+        <div class="form-row">
+          <div class="form-group">
+            <label>Prenume *</label>
+            <input id="f-first-name" required />
+          </div>
+          <div class="form-group">
+            <label>Nume *</label>
+            <input id="f-last-name" required />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Data naşterii *</label>
+            <input id="f-birth-date" type="date" required />
+          </div>
+          <div class="form-group">
+            <label>Gen</label>
+            <select id="f-gender">
+              <option value="">Selectează</option>
+              <option value="M">Masculin</option>
+              <option value="F">Feminin</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Poziție</label>
+            <select id="f-position">
+              <option value="">Selectează</option>
+              {sport?.positions.map(pos => (
+                <option value={pos.code}>{pos.name_ro}{pos.abbreviation ? ` (${pos.abbreviation})` : ''}</option>
+              ))}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Nr. tricou</label>
+            <input id="f-jersey" type="number" min="1" max="99" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Echipă</label>
+            <select id="f-team">
+              <option value="">Fără echipă</option>
+              {teams.map(t => (
+                <option value={t.id}>{t.name}</option>
+              ))}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Status</label>
+            <select id="f-status">
+              <option value="ACTIVE">Activ</option>
+              <option value="INACTIVE">Inactiv</option>
+              <option value="INJURED">Accidentat</option>
+              <option value="SUSPENDED">Suspendat</option>
+              <option value="TRANSFERRED">Transferat</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Email părinte</label>
+          <input id="f-parent-email" type="email" />
+        </div>
+        <div class="form-group">
+          <label>Telefon părinte</label>
+          <input id="f-parent-phone" type="tel" />
+        </div>
+        <div class="modal-footer">
+          <button type="button" onclick="closeModal()" class="btn-secondary">Anulează</button>
+          <button type="submit" class="btn-primary">Salvează</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</AdminLayout>
+
+<style>
+  .toolbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; gap:12px; }
+  .search-input { padding:8px 14px; border:1px solid #d1d5db; border-radius:8px; font-size:14px; width:280px; }
+  .table-wrap { background:#fff; border-radius:12px; overflow:auto; box-shadow:0 1px 4px rgba(0,0,0,.07); }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th { text-align:left; padding:12px 16px; border-bottom:2px solid #f1f5f9; color:#64748b; font-weight:600; font-size:12px; text-transform:uppercase; }
+  td { padding:12px 16px; border-bottom:1px solid #f8fafc; }
+  tr:last-child td { border-bottom:none; }
+  .player-name { display:flex; align-items:center; gap:10px; }
+  .avatar { width:36px; height:36px; border-radius:50%; background:#0f4c81; color:#fff; display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:600; flex-shrink:0; }
+  .fw600 { font-weight:600; color:#1e293b; }
+  .text-sm { font-size:12px; }
+  .text-gray { color:#94a3b8; }
+  .badge { padding:3px 10px; border-radius:20px; font-size:11px; font-weight:600; text-transform:uppercase; }
+  .badge--active { background:#d1fae5; color:#065f46; }
+  .badge--inactive { background:#f1f5f9; color:#64748b; }
+  .badge--injured { background:#fef3c7; color:#92400e; }
+  .badge--suspended { background:#fee2e2; color:#991b1b; }
+  .badge--transferred { background:#ede9fe; color:#5b21b6; }
+  .btn-icon { background:none; border:none; cursor:pointer; font-size:16px; padding:2px 4px; border-radius:4px; }
+  .btn-icon:hover { background:#f1f5f9; }
+  .btn-primary { background:#0f4c81; color:#fff; border:none; padding:9px 18px; border-radius:8px; cursor:pointer; font-size:14px; font-weight:600; font-family:inherit; }
+  .btn-primary:hover { background:#1565c0; }
+  .btn-secondary { background:#f1f5f9; color:#374151; border:none; padding:9px 18px; border-radius:8px; cursor:pointer; font-size:14px; font-weight:600; font-family:inherit; }
+  .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:200; display:flex; align-items:center; justify-content:center; padding:16px; }
+  .modal-overlay.hidden { display:none; }
+  .modal { background:#fff; border-radius:16px; width:100%; max-width:560px; max-height:90vh; overflow-y:auto; }
+  .modal-head { display:flex; justify-content:space-between; align-items:center; padding:20px 24px; border-bottom:1px solid #f1f5f9; }
+  .modal-head h2 { font-size:18px; color:#1e293b; }
+  .btn-close { background:none; border:none; font-size:22px; cursor:pointer; color:#64748b; }
+  .modal-body { padding:24px; }
+  .form-row { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .form-group { margin-bottom:16px; }
+  .form-group label { display:block; font-size:13px; font-weight:500; color:#374151; margin-bottom:6px; }
+  .form-group input, .form-group select { width:100%; padding:9px 12px; border:1px solid #d1d5db; border-radius:8px; font-size:14px; font-family:inherit; }
+  .modal-footer { display:flex; justify-content:flex-end; gap:10px; padding-top:8px; }
+</style>
+
+<script>
+  // Search filter
+  document.getElementById('search')?.addEventListener('input', e => {
+    const q = (e.target as HTMLInputElement).value.toLowerCase();
+    document.querySelectorAll<HTMLTableRowElement>('#players-table tbody tr').forEach(row => {
+      row.style.display = row.dataset.search?.toLowerCase().includes(q) ? '' : 'none';
+    });
+  });
+
+  let editingId: string | null = null;
+
+  function openModal() {
+    editingId = null;
+    (document.getElementById('modal-title') as HTMLElement).textContent = 'Jucător nou';
+    (document.getElementById('player-form') as HTMLFormElement).reset();
+    (document.getElementById('modal') as HTMLElement).classList.remove('hidden');
+  }
+
+  function closeModal() {
+    (document.getElementById('modal') as HTMLElement).classList.add('hidden');
+    editingId = null;
+  }
+
+  async function editPlayer(id: string) {
+    const res = await fetch(`/api/admin/players/${id}`);
+    if (!res.ok) return;
+    const p = await res.json();
+    editingId = id;
+    (document.getElementById('modal-title') as HTMLElement).textContent = 'Editează jucător';
+    (document.getElementById('f-first-name') as HTMLInputElement).value = p.first_name ?? '';
+    (document.getElementById('f-last-name') as HTMLInputElement).value = p.last_name ?? '';
+    (document.getElementById('f-birth-date') as HTMLInputElement).value = p.birth_date ?? '';
+    (document.getElementById('f-gender') as HTMLSelectElement).value = p.gender ?? '';
+    (document.getElementById('f-position') as HTMLSelectElement).value = p.position ?? '';
+    (document.getElementById('f-jersey') as HTMLInputElement).value = p.jersey_number ?? '';
+    (document.getElementById('f-status') as HTMLSelectElement).value = p.status ?? 'ACTIVE';
+    (document.getElementById('f-parent-email') as HTMLInputElement).value = p.parent_email ?? '';
+    (document.getElementById('f-parent-phone') as HTMLInputElement).value = p.parent_phone ?? '';
+    (document.getElementById('modal') as HTMLElement).classList.remove('hidden');
+  }
+
+  async function deletePlayer(id: string, name: string) {
+    if (!confirm(`Ștergi jucătorul ${name}?`)) return;
+    const res = await fetch(`/api/admin/players/${id}`, { method: 'DELETE' });
+    if (res.ok) location.reload();
+    else alert('Eroare la ștergere.');
+  }
+
+  document.getElementById('player-form')?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const body = {
+      first_name:   (document.getElementById('f-first-name') as HTMLInputElement).value,
+      last_name:    (document.getElementById('f-last-name') as HTMLInputElement).value,
+      birth_date:   (document.getElementById('f-birth-date') as HTMLInputElement).value,
+      gender:       (document.getElementById('f-gender') as HTMLSelectElement).value,
+      position:     (document.getElementById('f-position') as HTMLSelectElement).value,
+      jersey_number:(document.getElementById('f-jersey') as HTMLInputElement).value,
+      status:       (document.getElementById('f-status') as HTMLSelectElement).value,
+      team_id:      (document.getElementById('f-team') as HTMLSelectElement).value,
+      parent_email: (document.getElementById('f-parent-email') as HTMLInputElement).value,
+      parent_phone: (document.getElementById('f-parent-phone') as HTMLInputElement).value,
+    };
+    const url = editingId ? `/api/admin/players/${editingId}` : '/api/admin/players';
+    const method = editingId ? 'PUT' : 'POST';
+    const res = await fetch(url, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    if (res.ok) { closeModal(); location.reload(); }
+    else { const err = await res.json(); alert(err.error ?? 'Eroare la salvare.'); }
+  });
+</script>

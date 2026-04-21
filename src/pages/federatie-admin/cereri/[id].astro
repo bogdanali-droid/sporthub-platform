@@ -1,0 +1,116 @@
+---
+import FederatieLayout from '@/layouts/FederatieLayout.astro';
+if (!Astro.locals.user) return Astro.redirect('/login/federatie');
+
+const user = Astro.locals.user;
+const db = (Astro.locals as any).runtime?.env?.DB;
+const { id } = Astro.params;
+
+import { queryFirst, queryAll } from '@/lib/db';
+
+const cerere = await queryFirst<any>(db,
+  `SELECT fr.*, c.name AS club_name, p.first_name || ' ' || p.last_name AS player_name
+   FROM federation_requests fr
+   JOIN clubs c ON c.id = fr.club_id
+   LEFT JOIN players p ON p.id = fr.player_id
+   WHERE fr.id = ?`, [id]);
+
+if (!cerere) return Astro.redirect('/federatie-admin/cereri');
+
+const mesaje = await queryAll<any>(db,
+  `SELECT * FROM federation_request_messages WHERE request_id = ? ORDER BY created_at ASC`, [id]);
+
+const msg = Astro.url.searchParams.get('msg');
+
+const statusBadge: Record<string,string> = {
+  PENDING:'badge-yellow', IN_REVIEW:'badge-blue', APPROVED:'badge-green',
+  REJECTED:'badge-red', INFO_NEEDED:'badge-gold'
+};
+const statusLabel: Record<string,string> = {
+  PENDING:'Nou', IN_REVIEW:'În analiză', APPROVED:'Aprobat', REJECTED:'Respins', INFO_NEEDED:'Info necesară'
+};
+---
+
+<FederatieLayout title="Cerere — detalii" user={user} section="CCLTC">
+
+  <div style="margin-bottom:12px">
+    <a href="/federatie-admin/cereri" style="color:#64748b;font-size:13px;text-decoration:none">← Înapoi la Cereri</a>
+  </div>
+
+  {msg === 'actualizat' && <div class="alert alert-success">Status actualizat cu succes.</div>}
+  {msg === 'trimis' && <div class="alert alert-success">Mesaj trimis.</div>}
+
+  <div style="display:grid;grid-template-columns:1fr 300px;gap:20px">
+
+    <!-- Thread -->
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">{cerere.subject}</div>
+          <div style="font-size:12px;color:#64748b;margin-top:2px">{cerere.club_name} · {cerere.request_type}</div>
+        </div>
+        <span class={`badge ${statusBadge[cerere.status] ?? 'badge-gray'}`}>{statusLabel[cerere.status] ?? cerere.status}</span>
+      </div>
+
+      {cerere.description && (
+        <div style="background:#f8fafc;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:13.5px">
+          {cerere.description}
+        </div>
+      )}
+
+      <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px;min-height:60px">
+        {mesaje.length === 0 && <p style="color:#94a3b8;font-size:13px;text-align:center;padding:12px 0">Niciun mesaj.</p>}
+        {mesaje.map((m: any) => (
+          <div style={`display:flex;flex-direction:column;align-items:${m.sender_role === 'FEDERATION' ? 'flex-end' : 'flex-start'}`}>
+            <div style={`max-width:85%;padding:10px 14px;border-radius:10px;font-size:13.5px;${m.sender_role === 'FEDERATION' ? 'background:#001524;color:#fff;border-bottom-right-radius:2px' : 'background:#f1f5f9;color:#1e293b;border-bottom-left-radius:2px'}`}>
+              {m.message}
+            </div>
+            <span style="font-size:11px;color:#94a3b8;margin-top:3px">
+              {m.sender_role === 'FEDERATION' ? 'FRBS' : cerere.club_name} · {m.created_at?.slice(0,16)}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {!['APPROVED','REJECTED'].includes(cerere.status) && (
+        <form method="POST" action={`/api/federatie-admin/cereri/${id}/message`}>
+          <textarea name="message" class="form-textarea" rows="3" placeholder="Răspuns CCLTC..." required></textarea>
+          <div style="display:flex;justify-content:flex-end;margin-top:8px">
+            <button type="submit" class="btn btn-gold">Trimite răspuns</button>
+          </div>
+        </form>
+      )}
+    </div>
+
+    <!-- Sidebar acțiuni -->
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="card">
+        <div class="card-title" style="margin-bottom:12px">Schimbă status</div>
+        <form method="POST" action={`/api/federatie-admin/cereri/${id}/update`} style="display:flex;flex-direction:column;gap:8px">
+          <select name="status" class="form-select">
+            <option value="IN_REVIEW" selected={cerere.status === 'IN_REVIEW'}>În analiză</option>
+            <option value="INFO_NEEDED" selected={cerere.status === 'INFO_NEEDED'}>Info necesară</option>
+            <option value="APPROVED" selected={cerere.status === 'APPROVED'}>Aprobat</option>
+            <option value="REJECTED" selected={cerere.status === 'REJECTED'}>Respins</option>
+          </select>
+          <textarea name="response_notes" class="form-textarea" rows="2" placeholder="Note răspuns (vizibil club)">{cerere.response_notes}</textarea>
+          <button type="submit" class="btn btn-gold">Actualizează</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <div class="card-title" style="margin-bottom:10px">Detalii cerere</div>
+        <dl style="font-size:13px;display:flex;flex-direction:column;gap:8px">
+          <div><dt style="color:#64748b">Club</dt><dd style="font-weight:500">{cerere.club_name}</dd></div>
+          <div><dt style="color:#64748b">Tip</dt><dd>{cerere.request_type}</dd></div>
+          <div><dt style="color:#64748b">Jucător</dt><dd>{cerere.player_name ?? '—'}</dd></div>
+          <div><dt style="color:#64748b">Sport</dt><dd>{cerere.sport_code ?? '—'}</dd></div>
+          <div><dt style="color:#64748b">Prioritate</dt><dd>{cerere.priority}</dd></div>
+          <div><dt style="color:#64748b">Trimisă</dt><dd>{cerere.created_at?.slice(0,10)}</dd></div>
+        </dl>
+      </div>
+    </div>
+
+  </div>
+
+</FederatieLayout>

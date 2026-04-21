@@ -1,0 +1,101 @@
+---
+import FederatieLayout from '@/layouts/FederatieLayout.astro';
+if (!Astro.locals.user) return Astro.redirect('/login/federatie');
+const user = Astro.locals.user;
+if (!['FEDERATION_ADMIN','SUPERADMIN'].includes(user.role)) return Astro.redirect('/login/federatie');
+const db = (Astro.locals as any).runtime?.env?.DB;
+import { queryAll } from '@/lib/db';
+
+const filterSport  = Astro.url.searchParams.get('sport') ?? '';
+const filterStatus = Astro.url.searchParams.get('status') ?? '';
+
+let where = 'WHERE 1=1';
+const params: any[] = [];
+if (filterSport)  { where += ' AND (pl.sport_code = ? OR p.sport_code = ?)'; params.push(filterSport, filterSport); }
+if (filterStatus === 'LEGITIMAT')   { where += ' AND p.legitimation_status = \'LEGITIMAT\''; }
+if (filterStatus === 'NELEGITIMAT') { where += ' AND (p.legitimation_status = \'NELEGITIMAT\' OR p.legitimation_status IS NULL)'; }
+if (filterStatus === 'SUSPENDAT')   { where += ' AND p.legitimation_status = \'SUSPENDAT\''; }
+
+const jucatori = await queryAll<any>(db,
+  `SELECT p.id, p.first_name, p.last_name, p.legitimation_status,
+          c.name AS club_name,
+          pl.license_number, pl.status AS leg_status, pl.sport_code
+   FROM players p
+   LEFT JOIN clubs c ON c.id = p.club_id
+   LEFT JOIN player_legitimations pl ON pl.player_id = p.id AND pl.status = 'ACTIVE'
+   ${where}
+   ORDER BY p.last_name
+   LIMIT 200`, params);
+
+const statusBadge: Record<string,string> = {
+  LEGITIMAT: 'badge-green', NELEGITIMAT: 'badge-yellow', SUSPENDAT: 'badge-red'
+};
+const statusLabel: Record<string,string> = {
+  LEGITIMAT: 'Legitimat', NELEGITIMAT: 'Nelegitimat', SUSPENDAT: 'Suspendat'
+};
+---
+
+<FederatieLayout title="Jucători" user={user} section="CCLTC">
+
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+    <div>
+      <h1 style="font-size:20px;font-weight:700;color:#1e293b">Registru Național Jucători</h1>
+      <p style="font-size:13px;color:#64748b">Toți jucătorii înregistrați în federație (primele 200)</p>
+    </div>
+  </div>
+
+  <form method="GET" style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+    <select name="sport" class="form-select" style="width:160px" onchange="this.form.submit()">
+      <option value="">Toate sporturile</option>
+      <option value="BASEBALL5" selected={filterSport==='BASEBALL5'}>Baseball5</option>
+      <option value="SOFTBALL" selected={filterSport==='SOFTBALL'}>Softball</option>
+    </select>
+    <select name="status" class="form-select" style="width:180px" onchange="this.form.submit()">
+      <option value="">Toate statusurile</option>
+      <option value="LEGITIMAT" selected={filterStatus==='LEGITIMAT'}>Legitimat</option>
+      <option value="NELEGITIMAT" selected={filterStatus==='NELEGITIMAT'}>Nelegitimat</option>
+      <option value="SUSPENDAT" selected={filterStatus==='SUSPENDAT'}>Suspendat</option>
+    </select>
+    {(filterSport || filterStatus) && (
+      <a href="/federatie-admin/jucatori" class="btn btn-outline btn-sm" style="align-self:center">Resetează filtre</a>
+    )}
+  </form>
+
+  <div class="card">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Nume</th><th>Club</th><th>Sport</th><th>Licență</th><th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {jucatori.length === 0 && (
+          <tr><td colspan="5" style="text-align:center;color:#64748b;padding:24px">Nu există jucători cu acești filteri.</td></tr>
+        )}
+        {jucatori.map((p: any) => {
+          const legKey = p.legitimation_status ?? 'NELEGITIMAT';
+          const sport = p.sport_code ?? '—';
+          return (
+            <tr>
+              <td style="font-weight:500">{p.last_name} {p.first_name}</td>
+              <td style="font-size:13px;color:#475569">{p.club_name ?? <em style="color:#94a3b8">Fără club</em>}</td>
+              <td>
+                {sport !== '—'
+                  ? <span class="badge badge-blue">{sport}</span>
+                  : <em style="color:#94a3b8;font-size:12px">—</em>
+                }
+              </td>
+              <td style="font-family:monospace;font-size:12px">{p.license_number ?? <em style="color:#94a3b8">fără licență</em>}</td>
+              <td>
+                <span class={`badge ${statusBadge[legKey] ?? 'badge-gray'}`}>
+                  {statusLabel[legKey] ?? legKey}
+                </span>
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  </div>
+
+</FederatieLayout>

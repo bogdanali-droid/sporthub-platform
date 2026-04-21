@@ -1,0 +1,138 @@
+---
+export const prerender = false;
+import AdminLayout from '../../../layouts/AdminLayout.astro';
+import UploadWidget from '@/components/UploadWidget.astro';
+import { queryAll, queryAll as qa, execute } from '@/lib/db';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const db = (Astro.locals as any).runtime?.env?.DB;
+const clubId = user.club_id;
+
+let docs: any[] = [];
+try {
+  const res = await db?.prepare(`
+    SELECT pd.*, p.first_name, p.last_name
+    FROM player_documents pd JOIN players p ON p.id=pd.player_id
+    WHERE pd.club_id=? ORDER BY pd.uploaded_at DESC LIMIT 100
+  `).bind(clubId).all();
+  docs = res?.results ?? [];
+} catch {}
+
+const players = await queryAll<any>(db,
+  `SELECT id, first_name || ' ' || last_name AS name FROM players WHERE club_id=? AND is_active=1 ORDER BY last_name`,
+  [clubId]);
+
+const typeLabels: Record<string,string> = {
+  MEDICAL_FORM: 'Aviz medical', LICENSE: 'Legitimație', GDPR_CONSENT: 'GDPR',
+  PARENT_CONSENT: 'Acord părinte', IDENTITY: 'Identitate', CONTRACT: 'Contract', OTHER: 'Altele'
+};
+---
+
+<AdminLayout title="Documente" user={user}>
+  <div style="margin-bottom:20px;display:flex;justify-content:space-between;align-items:flex-start">
+    <div>
+      <h2 style="font-size:20px;font-weight:800">Documente</h2>
+      <p style="color:#6b7280;font-size:13px">Documente încărcate per jucător</p>
+    </div>
+    <button class="btn-primary" onclick="document.getElementById('modal-upload').classList.add('open')">
+      + Document nou
+    </button>
+  </div>
+
+  <div class="card" style="padding:0;overflow:hidden">
+    {docs.length === 0 ? (
+      <div style="padding:60px 24px;text-align:center;color:#9ca3af">
+        <div style="font-size:40px;margin-bottom:12px">📁</div>
+        <p style="font-weight:600">Niciun document încărcat</p>
+      </div>
+    ) : (
+      <table class="table">
+        <thead><tr><th>Jucător</th><th>Tip</th><th>Fișier</th><th>Încărcat</th><th></th></tr></thead>
+        <tbody>
+          {docs.map((d: any) => (
+            <tr>
+              <td style="font-weight:600">{d.first_name} {d.last_name}</td>
+              <td><span class="badge badge-blue">{typeLabels[d.type] || d.type}</span></td>
+              <td style="font-size:13px;color:#6b7280">{d.file_name}</td>
+              <td style="font-size:13px;color:#6b7280">{d.uploaded_at?.slice(0,10)}</td>
+              <td>
+                {d.file_url && (
+                  <a href={d.file_url} target="_blank" class="btn btn-ghost btn-sm">Deschide</a>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )}
+  </div>
+
+  <!-- Upload modal -->
+  <div class="modal-overlay" id="modal-upload">
+    <div class="modal" style="max-width:440px">
+      <div class="modal-header">
+        <span class="modal-title">Adaugă document</span>
+        <button onclick="document.getElementById('modal-upload').classList.remove('open')" style="background:none;border:none;cursor:pointer;font-size:18px;color:#64748b">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">Jucător *</label>
+          <select id="doc-player" class="form-select" required>
+            <option value="">Selectează jucătorul</option>
+            {players.map(p => <option value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Tip document *</label>
+          <select id="doc-type" class="form-select">
+            {Object.entries(typeLabels).map(([k,v]) => <option value={k}>{v}</option>)}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Fișier (max 10 MB — PDF, JPG, PNG)</label>
+          <UploadWidget folder="documents" accept=".pdf,.jpg,.jpeg,.png,.webp" label="Selectează fișier" onUploadCallback="onDocumentUploaded" />
+        </div>
+        <input type="hidden" id="doc-file-url" />
+        <input type="hidden" id="doc-file-key" />
+        <input type="hidden" id="doc-file-name" />
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="document.getElementById('modal-upload').classList.remove('open')">Anulează</button>
+        <button class="btn btn-primary" onclick="saveDocument()">Salvează</button>
+      </div>
+    </div>
+  </div>
+</AdminLayout>
+
+<script>
+function onDocumentUploaded(data) {
+  document.getElementById('doc-file-url').value = data.url;
+  document.getElementById('doc-file-key').value = data.key;
+  document.getElementById('doc-file-name').value = data.key.split('/').pop();
+}
+
+async function saveDocument() {
+  const player_id = document.getElementById('doc-player').value;
+  const type = document.getElementById('doc-type').value;
+  const file_url = document.getElementById('doc-file-url').value;
+  const file_name = document.getElementById('doc-file-name').value;
+
+  if (!player_id) { alert('Selectează un jucător'); return; }
+  if (!file_url) { alert('Încarcă un fișier mai întâi'); return; }
+
+  const res = await fetch(`/api/admin/players/${player_id}/documents`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ type, file_url, file_name }),
+  });
+
+  if (res.ok) {
+    window.location.reload();
+  } else {
+    const e = await res.json();
+    alert(e.error ?? 'Eroare la salvare');
+  }
+}
+</script>

@@ -1,0 +1,26 @@
+{
+  "name": "sporthub-platform",
+  "type": "module",
+  "version": "0.1.0",
+  "description": "SportHub — Multi-sport platform for Romanian clubs, federations & associations",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build && echo '_worker.js' > dist/.assetsignore",
+    "preview": "astro preview",
+    "deploy": "wrangler pages deploy ./dist",
+    "db:init": "wrangler d1 execute sporthub-db --file=schema.sql",
+    "db:local": "wrangler d1 execute sporthub-db --local --file=schema.sql"
+  },
+  "dependencies": {
+    "astro": "^4.16.0",
+    "@astrojs/cloudflare": "^11.0.0",
+    "@astrojs/tailwind": "^5.1.0",
+    "tailwindcss": "^3.4.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240725.0",
+    "typescript": "^5.5.0",
+    "wrangler": "^3.78.0"
+  }
+}

@@ -1,0 +1,138 @@
+---
+import FederatieLayout from '@/layouts/FederatieLayout.astro';
+if (!Astro.locals.user) return Astro.redirect('/login/federatie');
+const user = Astro.locals.user;
+if (!['FEDERATION_ADMIN','SUPERADMIN'].includes(user.role)) return Astro.redirect('/login/federatie');
+const db = (Astro.locals as any).runtime?.env?.DB;
+import { queryAll } from '@/lib/db';
+
+const filterSport = Astro.url.searchParams.get('sport') ?? '';
+const msg = Astro.url.searchParams.get('msg');
+
+let where = 'WHERE 1=1';
+const params: any[] = [];
+if (filterSport) { where += ' AND sport_code = ?'; params.push(filterSport); }
+
+const competitii = await queryAll<any>(db,
+  `SELECT * FROM federation_competitions ${where} ORDER BY season DESC, name`, params);
+
+const formatLabel: Record<string,string> = {
+  LEAGUE: 'Ligă', CUP: 'Cupă', GROUPS_KNOCKOUT: 'Grupe + Eliminatorii'
+};
+---
+
+<FederatieLayout title="Competiții" user={user} section="CCLTC">
+
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+    <div>
+      <h1 style="font-size:20px;font-weight:700;color:#1e293b">Competiții Federale</h1>
+      <p style="font-size:13px;color:#64748b">Gestionare competiții Baseball5 &amp; Softball</p>
+    </div>
+    <button class="btn btn-gold" onclick="document.getElementById('modal-add').classList.add('open')">+ Competiție nouă</button>
+  </div>
+
+  {msg === 'creat' && <div class="alert alert-success">Competiția a fost creată cu succes.</div>}
+
+  <form method="GET" style="display:flex;gap:10px;margin-bottom:16px">
+    <select name="sport" class="form-select" style="width:160px" onchange="this.form.submit()">
+      <option value="">Toate sporturile</option>
+      <option value="BASEBALL5" selected={filterSport==='BASEBALL5'}>Baseball5</option>
+      <option value="SOFTBALL" selected={filterSport==='SOFTBALL'}>Softball</option>
+    </select>
+  </form>
+
+  <div class="card">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Denumire</th><th>Sport</th><th>Sezon</th><th>Grupă vârstă</th><th>Format</th><th>Innings</th><th>Status</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {competitii.length === 0 && (
+          <tr><td colspan="8" style="text-align:center;color:#64748b;padding:24px">Nu există competiții înregistrate.</td></tr>
+        )}
+        {competitii.map((c: any) => (
+          <tr>
+            <td style="font-weight:500">
+              <a href={`/federatie-admin/competitii/${c.id}`} style="color:#1d4ed8;text-decoration:none">{c.name}</a>
+            </td>
+            <td><span class="badge badge-blue">{c.sport_code}</span></td>
+            <td>{c.season}</td>
+            <td><span class="badge badge-gray">{c.age_group ?? '—'}</span></td>
+            <td>{formatLabel[c.format] ?? c.format ?? '—'}</td>
+            <td style="text-align:center">{c.innings_count ?? '—'}</td>
+            <td>
+              <span class={`badge ${c.is_active ? 'badge-green' : 'badge-gray'}`}>
+                {c.is_active ? 'Activă' : 'Inactivă'}
+              </span>
+            </td>
+            <td>
+              <a href={`/federatie-admin/competitii/${c.id}`} class="btn btn-outline btn-sm">Detalii</a>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Modal creare competiție -->
+  <div class="modal-overlay" id="modal-add">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">Creare competiție nouă</span>
+        <button class="modal-close" onclick="document.getElementById('modal-add').classList.remove('open')">✕</button>
+      </div>
+      <form method="POST" action="/api/federatie-admin/competitii/create">
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">Denumire competiție *</label>
+            <input type="text" name="name" class="form-input" required placeholder="ex. Campionatul Național Baseball5 2025" />
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div class="form-group">
+              <label class="form-label">Sport *</label>
+              <select name="sport_code" class="form-select" required>
+                <option value="BASEBALL5">Baseball5</option>
+                <option value="SOFTBALL">Softball</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Sezon *</label>
+              <input type="text" name="season" class="form-input" required placeholder="ex. 2025" />
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div class="form-group">
+              <label class="form-label">Grupă de vârstă</label>
+              <select name="age_group" class="form-select">
+                <option value="OPEN">OPEN / Seniori</option>
+                <option value="U18">U18</option>
+                <option value="U15">U15</option>
+                <option value="U12">U12</option>
+                <option value="U10">U10</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Format</label>
+              <select name="format" class="form-select">
+                <option value="LEAGUE">Ligă</option>
+                <option value="CUP">Cupă</option>
+                <option value="GROUPS_KNOCKOUT">Grupe + Eliminatorii</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Număr innings</label>
+            <input type="number" name="innings_count" class="form-input" min="1" max="9" placeholder="ex. 7" />
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" onclick="document.getElementById('modal-add').classList.remove('open')">Anulează</button>
+          <button type="submit" class="btn btn-gold">Creează competiție</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+</FederatieLayout>

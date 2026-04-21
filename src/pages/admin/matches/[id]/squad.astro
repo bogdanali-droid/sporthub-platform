@@ -1,0 +1,257 @@
+---
+import AdminLayout from '@/layouts/AdminLayout.astro';
+if (!Astro.locals.user) return Astro.redirect('/login');
+const user = Astro.locals.user;
+const db = (Astro.locals as any).runtime?.env?.DB;
+const matchId = Astro.params.id!;
+
+import { queryFirst, queryAll } from '@/lib/db';
+import { getClubSportConfig } from '@/lib/sport-config';
+
+const match = await queryFirst<any>(db,
+  `SELECT m.*, t.name AS team_name FROM matches m JOIN teams t ON t.id = m.team_id
+   WHERE m.id=? AND m.club_id=?`, [matchId, user.club_id]);
+if (!match) return Astro.redirect('/admin/matches');
+
+const [sport, players, selections] = await Promise.all([
+  getClubSportConfig(db, user.club_id!),
+  queryAll<any>(db,
+    `SELECT id, first_name, last_name, position FROM players
+     WHERE club_id=? AND is_active=1 ORDER BY last_name, first_name`,
+    [user.club_id]),
+  queryAll<any>(db,
+    `SELECT ms.*, p.first_name || ' ' || p.last_name AS player_name, p.position
+     FROM match_selections ms JOIN players p ON p.id = ms.player_id
+     WHERE ms.match_id=? ORDER BY ms.role, p.last_name`,
+    [matchId]),
+]);
+
+const selectionMap = new Map(selections.map(s => [s.player_id, s]));
+const inSquad    = players.filter(p => selectionMap.has(p.id));
+const notInSquad = players.filter(p => !selectionMap.has(p.id));
+
+const roleLabel: Record<string,string> = { STARTER:'Titular', RESERVE:'Rezervă', COACH:'Antrenor' };
+const roleColor: Record<string,string> = {
+  STARTER: 'background:#dbeafe;color:#1e40af',
+  RESERVE: 'background:#fef3c7;color:#92400e',
+  COACH:   'background:#d1fae5;color:#065f46',
+};
+
+const positions = sport?.positions ?? [];
+---
+
+<AdminLayout title={`Lot — vs ${match.opponent_name}`} user={user} sportCode={sport?.code} sportIcon={sport?.icon}>
+
+  <div class="page-head">
+    <a href="/admin/matches" class="back-link">← Înapoi la Meciuri</a>
+    <div class="match-info">
+      <span class="fw600">{match.team_name} vs {match.opponent_name}</span>
+      <span class="text-sm text-gray">{match.match_date?.slice(0,10)}</span>
+    </div>
+  </div>
+
+  <div class="squad-grid">
+
+    <!-- LEFT: Current squad -->
+    <div>
+      <h2 class="section-title">Lot selectat ({selections.length})</h2>
+      {selections.length === 0 && (
+        <div class="empty-state">Niciun jucător selectat încă.</div>
+      )}
+      <div class="table-wrap">
+        {selections.length > 0 && (
+          <table>
+            <thead><tr>
+              <th>Jucător</th><th>Rol</th><th>Poziție</th><th>Acțiuni</th>
+            </tr></thead>
+            <tbody id="squad-tbody">
+              {selections.map(s => (
+                <tr id={`row-${s.player_id}`}>
+                  <td class="fw600">{s.player_name}</td>
+                  <td><span class="badge" style={roleColor[s.role] ?? ''}>{roleLabel[s.role] ?? s.role}</span></td>
+                  <td class="text-gray">{s.position_played ?? s.position ?? '—'}</td>
+                  <td>
+                    <button class="btn-icon" onclick={`editSelection('${s.player_id}','${s.role}','${s.position_played ?? ''}')`} title="Editează">✏️</button>
+                    <button class="btn-icon btn-remove" onclick={`removePlayer('${s.player_id}')`} title="Elimină din lot">✕</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+
+    <!-- RIGHT: Available players -->
+    <div>
+      <h2 class="section-title">Jucători disponibili ({notInSquad.length})</h2>
+      {notInSquad.length === 0 && (
+        <div class="empty-state">Toți jucătorii activi sunt deja în lot.</div>
+      )}
+      <div class="player-list" id="available-list">
+        {notInSquad.map(p => (
+          <div class="player-card" id={`avail-${p.id}`}>
+            <div>
+              <div class="fw600">{p.first_name} {p.last_name}</div>
+              <div class="text-sm text-gray">{p.position ?? '—'}</div>
+            </div>
+            <button class="btn-add" onclick={`addPlayer('${p.id}','${p.first_name} ${p.last_name}','${p.position ?? ''}')`}>
+              + Adaugă
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ADD / EDIT MODAL -->
+  <div id="modal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-head">
+        <h2 id="modal-title">Adaugă la lot</h2>
+        <button onclick="closeModal()" class="btn-close">×</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="m-player-id" />
+        <p id="m-player-name" class="player-name-label"></p>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Rol</label>
+            <select id="m-role">
+              <option value="STARTER">Titular</option>
+              <option value="RESERVE">Rezervă</option>
+              <option value="COACH">Antrenor</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Poziție</label>
+            <select id="m-position">
+              <option value="">— nespecificată —</option>
+              {positions.map(pos => (
+                <option value={pos.code}>{pos.name_ro}{pos.abbreviation ? ` (${pos.abbreviation})` : ''}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" onclick="closeModal()" class="btn-secondary">Anulează</button>
+          <button type="button" onclick="saveSelection()" class="btn-primary">Salvează</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</AdminLayout>
+
+<style>
+  .page-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:10px}
+  .back-link{color:#0f4c81;text-decoration:none;font-size:14px;font-weight:500}
+  .back-link:hover{text-decoration:underline}
+  .match-info{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
+  .section-title{font-size:16px;font-weight:700;color:#1e293b;margin:0 0 12px}
+  .squad-grid{display:grid;grid-template-columns:1fr 320px;gap:24px;align-items:start}
+  @media(max-width:800px){.squad-grid{grid-template-columns:1fr}}
+  .table-wrap{background:#fff;border-radius:12px;overflow:auto;box-shadow:0 1px 4px rgba(0,0,0,.07)}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th{text-align:left;padding:12px 16px;border-bottom:2px solid #f1f5f9;color:#64748b;font-size:12px;font-weight:600;text-transform:uppercase}
+  td{padding:11px 16px;border-bottom:1px solid #f8fafc;vertical-align:middle}
+  tr:last-child td{border-bottom:none}
+  .fw600{font-weight:600;color:#1e293b}.text-sm{font-size:12px}.text-gray{color:#94a3b8}
+  .badge{padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600}
+  .btn-icon{background:none;border:none;cursor:pointer;font-size:15px;padding:3px 5px;border-radius:4px}
+  .btn-icon:hover{background:#f1f5f9}
+  .btn-remove{color:#dc2626}
+  .empty-state{background:#fff;border-radius:12px;padding:32px;text-align:center;color:#94a3b8;font-size:14px;box-shadow:0 1px 4px rgba(0,0,0,.07)}
+  .player-list{display:flex;flex-direction:column;gap:8px}
+  .player-card{display:flex;align-items:center;justify-content:space-between;background:#fff;border-radius:10px;padding:12px 14px;box-shadow:0 1px 3px rgba(0,0,0,.06);gap:8px}
+  .btn-add{padding:6px 14px;background:#0f4c81;color:#fff;border:none;border-radius:7px;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap}
+  .btn-add:hover{background:#1a6fbd}
+  .player-name-label{font-weight:600;color:#1e293b;margin:0 0 16px;font-size:15px}
+  .btn-primary{background:#0f4c81;color:#fff;border:none;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;font-family:inherit}
+  .btn-secondary{background:#f1f5f9;color:#374151;border:none;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;font-family:inherit}
+  .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:flex;align-items:center;justify-content:center;padding:16px}
+  .modal-overlay.hidden{display:none}
+  .modal{background:#fff;border-radius:16px;width:100%;max-width:420px;max-height:90vh;overflow-y:auto}
+  .modal-head{display:flex;justify-content:space-between;align-items:center;padding:20px 24px;border-bottom:1px solid #f1f5f9}
+  .modal-head h2{font-size:18px;color:#1e293b;margin:0}
+  .btn-close{background:none;border:none;font-size:22px;cursor:pointer;color:#64748b}
+  .modal-body{padding:24px}
+  .form-row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .form-group{margin-bottom:16px}
+  .form-group label{display:block;font-size:13px;font-weight:500;color:#374151;margin-bottom:6px}
+  .form-group select{width:100%;padding:9px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;font-family:inherit}
+  .modal-footer{display:flex;justify-content:flex-end;gap:10px;padding-top:8px}
+</style>
+
+<script define:vars={{ matchId }}>
+  const MATCH_ID = matchId;
+  let currentPlayerId = '';
+  let currentPlayerName = '';
+  let currentPlayerPosition = '';
+
+  const roleLabel = { STARTER:'Titular', RESERVE:'Rezervă', COACH:'Antrenor' };
+  const roleColor = {
+    STARTER: 'background:#dbeafe;color:#1e40af',
+    RESERVE: 'background:#fef3c7;color:#92400e',
+    COACH:   'background:#d1fae5;color:#065f46',
+  };
+
+  function openModal(playerId, playerName, role, position) {
+    currentPlayerId = playerId;
+    currentPlayerName = playerName;
+    (document.getElementById('m-player-id') as HTMLInputElement).value = playerId;
+    (document.getElementById('m-player-name') as HTMLElement).textContent = playerName;
+    (document.getElementById('m-role') as HTMLSelectElement).value = role || 'STARTER';
+    (document.getElementById('m-position') as HTMLSelectElement).value = position || '';
+    (document.getElementById('modal') as HTMLElement).classList.remove('hidden');
+  }
+
+  function closeModal() {
+    (document.getElementById('modal') as HTMLElement).classList.add('hidden');
+  }
+
+  function addPlayer(id, name, position) {
+    (document.getElementById('modal-title') as HTMLElement).textContent = 'Adaugă la lot';
+    openModal(id, name, 'STARTER', position);
+  }
+
+  function editSelection(playerId, role, position) {
+    (document.getElementById('modal-title') as HTMLElement).textContent = 'Editează selecție';
+    const nameEl = document.querySelector(`#row-${playerId} td.fw600`);
+    openModal(playerId, nameEl?.textContent ?? '', role, position);
+  }
+
+  async function saveSelection() {
+    const playerId  = (document.getElementById('m-player-id') as HTMLInputElement).value;
+    const role      = (document.getElementById('m-role') as HTMLSelectElement).value;
+    const position  = (document.getElementById('m-position') as HTMLSelectElement).value || null;
+    const r = await fetch(`/api/admin/matches/${MATCH_ID}/squad`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ player_id: playerId, role, position_played: position }),
+    });
+    if (r.ok) {
+      closeModal();
+      window.location.reload();
+    } else {
+      const err = await r.json();
+      alert(err.error ?? 'Eroare');
+    }
+  }
+
+  async function removePlayer(playerId) {
+    if (!confirm('Elimini jucătorul din lot?')) return;
+    const r = await fetch(`/api/admin/matches/${MATCH_ID}/squad`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ player_id: playerId }),
+    });
+    if (r.ok) {
+      window.location.reload();
+    } else {
+      const err = await r.json();
+      alert(err.error ?? 'Eroare');
+    }
+  }
+</script>

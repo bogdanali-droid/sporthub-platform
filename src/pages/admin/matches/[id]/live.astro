@@ -1,0 +1,477 @@
+---
+import AdminLayout from '@/layouts/AdminLayout.astro';
+if (!Astro.locals.user) return Astro.redirect('/login');
+
+const user = Astro.locals.user;
+const db = (Astro.locals as any).runtime?.env?.DB;
+const matchId = Astro.params.id!;
+
+import { queryFirst, queryAll } from '@/lib/db';
+import { getClubSportConfig } from '@/lib/sport-config';
+
+const match = await queryFirst<any>(db,
+  `SELECT m.*, t.name AS team_name FROM matches m JOIN teams t ON t.id = m.team_id
+   WHERE m.id=? AND m.club_id=?`, [matchId, user.club_id]);
+if (!match) return Astro.redirect('/admin/matches');
+
+const [sport, roster, evalAttrs] = await Promise.all([
+  getClubSportConfig(db, user.club_id!),
+  queryAll<any>(db,
+    `SELECT p.id, p.first_name || ' ' || p.last_name AS name, ms.position_played
+     FROM match_selections ms JOIN players p ON p.id = ms.player_id
+     WHERE ms.match_id=? ORDER BY p.last_name`, [matchId]),
+  queryAll<any>(db,
+    `SELECT code, name_ro, category FROM sport_evaluation_attributes
+     WHERE sport_code=? ORDER BY display_order LIMIT 8`,
+    [user.sport_code ?? 'BASEBALL5']),
+]);
+
+const periodData: any[] = match.period_data ? JSON.parse(match.period_data) : [];
+const innings = sport?.periodsCount ?? 5;
+const eventTypes = sport?.eventTypes ?? [];
+const isInnings = sport?.scoringMode === 'INNINGS';
+
+const scoreHome = match.score_home ?? 0;
+const scoreAway = match.score_away ?? 0;
+
+// Recent events (last 20)
+const recentEvents = await queryAll<any>(db,
+  `SELECT me.*, p.first_name || ' ' || p.last_name AS player_name
+   FROM match_events me LEFT JOIN players p ON p.id = me.player_id
+   WHERE me.match_id=? ORDER BY me.created_at DESC LIMIT 20`, [matchId]);
+---
+
+<AdminLayout title={`Live: ${match.opponent_name}`} user={user} sportCode={sport?.code} sportIcon={sport?.icon}>
+
+  <div id="live-root">
+    <!-- Header bar -->
+    <div class="live-header">
+      <div class="live-title">
+        <span class="live-badge" id="status-badge" data-status={match.status}>
+          {match.status === 'LIVE' ? '🔴 LIVE' : match.status === 'FINISHED' ? '✅ Terminat' : '🕐 Programat'}
+        </span>
+        <span class="match-label">{match.team_name} vs {match.opponent_name}</span>
+        <span class="comp-label">{match.competition ?? ''}</span>
+      </div>
+      <div class="live-controls">
+        {match.status !== 'LIVE' && match.status !== 'FINISHED' && (
+          <button class="btn btn-live" onclick="setStatus('LIVE')">▶ Start Meci</button>
+        )}
+        {match.status === 'LIVE' && (
+          <button class="btn btn-finish" onclick="setStatus('FINISHED')">⏹ Termină Meciul</button>
+        )}
+        <a href={`/admin/matches`} class="btn btn-outline-sm">← Înapoi</a>
+      </div>
+    </div>
+
+    <!-- Score board -->
+    <div class="scoreboard">
+      <div class="score-team">
+        <div class="team-name">{match.team_name}</div>
+        <div class="score-val" id="score-home">{scoreHome}</div>
+      </div>
+      <div class="score-sep">–</div>
+      <div class="score-team">
+        <div class="team-name">{match.opponent_name}</div>
+        <div class="score-val" id="score-away">{scoreAway}</div>
+      </div>
+    </div>
+
+    <div class="live-grid">
+
+      <!-- LEFT: Box Score + Events -->
+      <div class="live-left">
+
+        {isInnings && (
+          <div class="card">
+            <div class="card-title">Box Score — {sport?.periodsLabel ?? 'Inning'}</div>
+            <div class="box-score-wrap">
+              <table class="box-score">
+                <thead>
+                  <tr>
+                    <th>Echipă</th>
+                    {Array.from({length: innings}, (_, i) => <th>{i+1}</th>)}
+                    <th class="total">R</th>
+                  </tr>
+                </thead>
+                <tbody id="box-score-body">
+                  {/* Home team = BOTTOM half */}
+                  <tr id="row-home">
+                    <td class="team-col">{match.team_name}</td>
+                    {Array.from({length: innings}, (_, i) => {
+                      const p = periodData.find((x: any) => x.inning === i+1);
+                      return (
+                        <td class="inning-cell" data-inning={i+1} data-half="BOTTOM">
+                          <input type="number" min="0" max="99" class="inning-input"
+                            id={`inp-home-${i+1}`} value={p?.bottom ?? ''}
+                            onchange={`updateInning(${i+1},'BOTTOM',this.value)`} />
+                        </td>
+                      );
+                    })}
+                    <td class="total" id="total-home">{scoreHome}</td>
+                  </tr>
+                  {/* Away team = TOP half */}
+                  <tr id="row-away">
+                    <td class="team-col">{match.opponent_name}</td>
+                    {Array.from({length: innings}, (_, i) => {
+                      const p = periodData.find((x: any) => x.inning === i+1);
+                      return (
+                        <td class="inning-cell" data-inning={i+1} data-half="TOP">
+                          <input type="number" min="0" max="99" class="inning-input"
+                            id={`inp-away-${i+1}`} value={p?.top ?? ''}
+                            onchange={`updateInning(${i+1},'TOP',this.value)`} />
+                        </td>
+                      );
+                    })}
+                    <td class="total" id="total-away">{scoreAway}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        <!-- Quick event buttons -->
+        <div class="card">
+          <div class="card-title">Evenimente Rapide</div>
+          <div class="event-grid">
+            {eventTypes.filter((e: any) => !e.is_discipline).map((e: any) => (
+              <button class="evt-btn" onclick={`quickEvent('${e.code}','${e.name_ro}',${e.default_points || 0})`}>
+                {e.name_ro}
+              </button>
+            ))}
+          </div>
+          <!-- Player selector for event -->
+          <div class="evt-row" style="margin-top:10px">
+            <select id="evt-player" class="form-sel">
+              <option value="">— Jucător opțional —</option>
+              {roster.map((p: any) => <option value={p.id}>{p.name}</option>)}
+            </select>
+            <select id="evt-team" class="form-sel">
+              <option value="HOME">Acasă ({match.team_name})</option>
+              <option value="AWAY">Oaspete ({match.opponent_name})</option>
+            </select>
+            <input id="evt-inning" type="number" min="1" max={innings} placeholder="Inning" class="form-num" />
+          </div>
+        </div>
+
+        <!-- Event log -->
+        <div class="card">
+          <div class="card-title">Jurnal Evenimente</div>
+          <div id="event-log" class="event-log">
+            {recentEvents.length === 0 && <p class="empty-msg">Niciun eveniment înregistrat.</p>}
+            {recentEvents.map((e: any) => (
+              <div class="evt-log-row">
+                <span class="evt-badge" data-team={e.team}>{e.team === 'HOME' ? '🏠' : '✈️'}</span>
+                <span class="evt-type">{e.event_type}</span>
+                {e.player_name && <span class="evt-player">{e.player_name}</span>}
+                {e.period && <span class="evt-period">Inn.{e.period}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT: Video + Evaluări -->
+      <div class="live-right">
+
+        <!-- YouTube Live -->
+        <div class="card video-card">
+          <div class="card-title">
+            <span>▶ YouTube Live</span>
+            <button class="btn-edit-video" onclick="toggleVideoEdit('yt')">✏️</button>
+          </div>
+          <div id="yt-embed-wrap">
+            {match.youtube_video_id ? (
+              <iframe
+                src={`https://www.youtube.com/embed/${match.youtube_video_id}?autoplay=0&rel=0`}
+                class="yt-iframe" allowfullscreen allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              />
+            ) : (
+              <div class="video-placeholder">Niciun stream YouTube configurat</div>
+            )}
+          </div>
+          <div id="yt-edit" class="video-edit hidden">
+            <input type="text" id="yt-id" placeholder="YouTube Video ID (ex: dQw4w9WgXcQ)"
+              class="form-input-sm" value={match.youtube_video_id ?? ''} />
+            <button class="btn-save-video" onclick="saveVideo()">Salvează</button>
+          </div>
+          {match.youtube_video_id && (
+            <div class="chat-link">
+              <a href={`https://www.youtube.com/watch?v=${match.youtube_video_id}`} target="_blank" class="link-sm">
+                💬 Chat YouTube Live →
+              </a>
+            </div>
+          )}
+        </div>
+
+        <!-- Veo Camera -->
+        <div class="card video-card">
+          <div class="card-title">
+            <span>📷 Veo Camera</span>
+            <button class="btn-edit-video" onclick="toggleVideoEdit('veo')">✏️</button>
+          </div>
+          {match.veo_share_url ? (
+            <a href={match.veo_share_url} target="_blank" class="veo-link">
+              🔗 Vizualizează înregistrarea Veo →
+            </a>
+          ) : (
+            <div class="video-placeholder">Niciun link Veo configurat</div>
+          )}
+          <div id="veo-edit" class="video-edit hidden">
+            <input type="text" id="veo-url" placeholder="URL share Veo (ex: https://app.veo.co/...)"
+              class="form-input-sm" value={match.veo_share_url ?? ''} />
+            <button class="btn-save-video" onclick="saveVideo()">Salvează</button>
+          </div>
+        </div>
+
+        <!-- XbotGo AI Camera -->
+        <div class="card video-card">
+          <div class="card-title">
+            <span>🤖 XbotGo AI Camera</span>
+            <button class="btn-edit-video" onclick="toggleVideoEdit('xbotgo')">✏️</button>
+          </div>
+          {match.xbotgo_stream_url ? (
+            <a href={match.xbotgo_stream_url} target="_blank" class="veo-link">
+              🔗 Stream XbotGo →
+            </a>
+          ) : (
+            <div class="video-placeholder">Niciun stream XbotGo configurat</div>
+          )}
+          <div id="xbotgo-edit" class="video-edit hidden">
+            <input type="text" id="xbotgo-url" placeholder="URL stream XbotGo Chameleon"
+              class="form-input-sm" value={match.xbotgo_stream_url ?? ''} />
+            <button class="btn-save-video" onclick="saveVideo()">Salvează</button>
+          </div>
+        </div>
+
+        <!-- Player Evaluations (in-match) -->
+        {roster.length > 0 && evalAttrs.length > 0 && (
+          <div class="card">
+            <div class="card-title">Evaluare Rapidă Jucători</div>
+            <div class="eval-form">
+              <select id="eval-player" class="form-sel">
+                <option value="">Selectează jucător</option>
+                {roster.map((p: any) => <option value={p.id}>{p.name}</option>)}
+              </select>
+              <div id="eval-stars" class="eval-attrs">
+                {evalAttrs.map((a: any) => (
+                  <div class="eval-row">
+                    <label class="eval-label">{a.name_ro}</label>
+                    <div class="star-row" data-attr={a.code}>
+                      {[1,2,3,4,5].map(n => (
+                        <button class="star-btn" data-val={n} onclick={`setStar('${a.code}',${n},this)`}>★</button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <button class="btn btn-gold-sm" onclick="saveEval()">Salvează evaluare</button>
+            </div>
+          </div>
+        )}
+
+      </div>
+    </div>
+  </div>
+
+</AdminLayout>
+
+<style>
+  .live-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px}
+  .live-title{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .live-badge{font-weight:700;font-size:13px;padding:4px 10px;border-radius:20px;background:#fee2e2;color:#dc2626}
+  .live-badge[data-status="LIVE"]{background:#fee2e2;color:#dc2626}
+  .live-badge[data-status="FINISHED"]{background:#dcfce7;color:#16a34a}
+  .live-badge[data-status="SCHEDULED"]{background:#f1f5f9;color:#475569}
+  .match-label{font-size:18px;font-weight:700;color:#0f172a}
+  .comp-label{font-size:12px;color:#94a3b8}
+  .live-controls{display:flex;gap:8px;align-items:center}
+
+  .scoreboard{display:flex;align-items:center;justify-content:center;gap:32px;padding:20px;background:#0f172a;border-radius:16px;margin-bottom:20px;color:#fff}
+  .score-team{text-align:center}
+  .team-name{font-size:13px;color:#94a3b8;margin-bottom:4px}
+  .score-val{font-size:52px;font-weight:800;line-height:1;color:#f8fafc}
+  .score-sep{font-size:40px;color:#475569;font-weight:300}
+
+  .live-grid{display:grid;grid-template-columns:1fr 340px;gap:16px}
+  @media(max-width:900px){.live-grid{grid-template-columns:1fr}}
+
+  .card{background:#fff;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.07);padding:16px;margin-bottom:16px}
+  .card-title{font-weight:600;font-size:14px;color:#0f172a;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center}
+
+  .box-score-wrap{overflow-x:auto}
+  .box-score{width:100%;border-collapse:collapse;font-size:13px}
+  .box-score th,.box-score td{padding:6px 10px;border:1px solid #e2e8f0;text-align:center}
+  .box-score th{background:#f8fafc;font-size:11px;color:#64748b;font-weight:600}
+  .box-score .team-col{text-align:left;font-weight:600;white-space:nowrap;min-width:100px}
+  .box-score .total{font-weight:700;background:#fafafa}
+  .inning-input{width:36px;text-align:center;border:1px solid #e2e8f0;border-radius:4px;padding:4px;font-size:13px;font-family:inherit}
+  .inning-input:focus{outline:none;border-color:#3b82f6;box-shadow:0 0 0 2px rgba(59,130,246,.2)}
+
+  .event-grid{display:flex;flex-wrap:wrap;gap:8px}
+  .evt-btn{padding:6px 12px;border-radius:8px;border:1px solid #e2e8f0;background:#f8fafc;cursor:pointer;font-size:12px;font-weight:500;color:#1e293b;transition:background .15s}
+  .evt-btn:hover{background:#dbeafe;border-color:#93c5fd}
+  .evt-row{display:flex;gap:8px;flex-wrap:wrap}
+  .form-sel{padding:6px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:13px;font-family:inherit;flex:1;min-width:120px}
+  .form-num{padding:6px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:13px;width:72px}
+
+  .event-log{max-height:240px;overflow-y:auto;display:flex;flex-direction:column;gap:6px}
+  .evt-log-row{display:flex;align-items:center;gap:8px;padding:6px 8px;background:#f8fafc;border-radius:8px;font-size:13px}
+  .evt-badge{font-size:16px}
+  .evt-type{font-weight:600;color:#1e293b}
+  .evt-player{color:#64748b}
+  .evt-period{font-size:11px;background:#e2e8f0;padding:1px 6px;border-radius:10px;color:#475569}
+  .empty-msg{color:#94a3b8;font-size:13px;padding:8px 0}
+
+  .video-card .card-title{font-size:13px}
+  .video-placeholder{color:#94a3b8;font-size:13px;padding:12px 0;text-align:center}
+  .yt-iframe{width:100%;aspect-ratio:16/9;border:none;border-radius:8px}
+  .veo-link{display:block;padding:10px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;color:#16a34a;font-size:13px;text-decoration:none;font-weight:500}
+  .veo-link:hover{background:#dcfce7}
+  .video-edit{margin-top:10px;display:flex;gap:8px;align-items:center}
+  .form-input-sm{flex:1;padding:6px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:12px;font-family:inherit}
+  .btn-edit-video{background:none;border:none;cursor:pointer;color:#94a3b8;font-size:14px;padding:2px 4px}
+  .btn-edit-video:hover{color:#64748b}
+  .btn-save-video{padding:6px 12px;background:#3b82f6;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;white-space:nowrap}
+  .chat-link{margin-top:8px}
+  .link-sm{font-size:12px;color:#3b82f6;text-decoration:none}
+  .hidden{display:none!important}
+
+  .eval-form{display:flex;flex-direction:column;gap:10px}
+  .eval-attrs{display:flex;flex-direction:column;gap:8px;padding:8px 0}
+  .eval-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .eval-label{font-size:12px;color:#475569;min-width:120px}
+  .star-row{display:flex;gap:4px}
+  .star-btn{background:none;border:none;cursor:pointer;font-size:20px;color:#d1d5db;padding:2px;line-height:1;transition:color .1s}
+  .star-btn.active{color:#f59e0b}
+  .star-btn:hover{color:#fbbf24}
+  .btn-gold-sm{padding:8px 16px;background:#f59e0b;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;align-self:flex-start}
+
+  .btn{padding:8px 16px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:600}
+  .btn-live{background:#dc2626;color:#fff}
+  .btn-live:hover{background:#b91c1c}
+  .btn-finish{background:#16a34a;color:#fff}
+  .btn-finish:hover{background:#15803d}
+  .btn-outline-sm{padding:7px 14px;border:1px solid #d1d5db;background:#fff;color:#475569;border-radius:8px;font-size:13px;text-decoration:none;display:inline-flex;align-items:center}
+</style>
+
+<script define:vars={{ matchId, innings }}>
+const MATCH_ID = matchId;
+const evalScores = {};
+
+async function apiFetch(path, opts = {}) {
+  const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+  if (!res.ok) { const t = await res.text(); console.error(path, t); return null; }
+  return res.json();
+}
+
+async function setStatus(status) {
+  await apiFetch(`/api/admin/matches/${MATCH_ID}/status`, {
+    method: 'POST', body: JSON.stringify({ status })
+  });
+  document.getElementById('status-badge').textContent =
+    status === 'LIVE' ? '🔴 LIVE' : status === 'FINISHED' ? '✅ Terminat' : '🕐 Programat';
+  document.getElementById('status-badge').dataset.status = status;
+  pollState();
+}
+
+async function updateInning(inning, half, value) {
+  const runs = parseInt(value) || 0;
+  const data = await apiFetch(`/api/admin/matches/${MATCH_ID}/inning`, {
+    method: 'POST', body: JSON.stringify({ inning, half, runs })
+  });
+  if (data) {
+    document.getElementById('score-home').textContent = data.score_home;
+    document.getElementById('score-away').textContent = data.score_away;
+    document.getElementById('total-home').textContent = data.score_home;
+    document.getElementById('total-away').textContent = data.score_away;
+  }
+}
+
+async function quickEvent(code, name, points) {
+  const playerId = document.getElementById('evt-player').value || null;
+  const team = document.getElementById('evt-team').value || 'HOME';
+  const inning = parseInt(document.getElementById('evt-inning').value) || null;
+  await apiFetch(`/api/admin/matches/${MATCH_ID}/event`, {
+    method: 'POST',
+    body: JSON.stringify({ event_type: code, team, player_id: playerId, period: inning, points })
+  });
+  addEventToLog({ event_type: code, team, player_name: null, period: inning });
+}
+
+function addEventToLog(e) {
+  const log = document.getElementById('event-log');
+  const empty = log.querySelector('.empty-msg');
+  if (empty) empty.remove();
+  const row = document.createElement('div');
+  row.className = 'evt-log-row';
+  row.innerHTML = `<span class="evt-badge">${e.team === 'HOME' ? '🏠' : '✈️'}</span>
+    <span class="evt-type">${e.event_type}</span>
+    ${e.player_name ? `<span class="evt-player">${e.player_name}</span>` : ''}
+    ${e.period ? `<span class="evt-period">Inn.${e.period}</span>` : ''}`;
+  log.prepend(row);
+}
+
+function toggleVideoEdit(type) {
+  const el = document.getElementById(`${type}-edit`);
+  el.classList.toggle('hidden');
+}
+
+async function saveVideo() {
+  const ytId = document.getElementById('yt-id')?.value?.trim() || null;
+  const veoUrl = document.getElementById('veo-url')?.value?.trim() || null;
+  const xbotgoUrl = document.getElementById('xbotgo-url')?.value?.trim() || null;
+  await apiFetch(`/api/admin/matches/${MATCH_ID}/video`, {
+    method: 'POST',
+    body: JSON.stringify({ youtube_video_id: ytId, veo_share_url: veoUrl, xbotgo_stream_url: xbotgoUrl })
+  });
+  // Reload to show embed
+  window.location.reload();
+}
+
+function setStar(attr, val, btn) {
+  evalScores[attr] = val;
+  const row = btn.closest('.star-row');
+  row.querySelectorAll('.star-btn').forEach(b => {
+    b.classList.toggle('active', parseInt(b.dataset.val) <= val);
+  });
+}
+
+async function saveEval() {
+  const playerId = document.getElementById('eval-player').value;
+  if (!playerId) { alert('Selectează un jucător'); return; }
+  if (Object.keys(evalScores).length === 0) { alert('Acordă cel puțin o notă'); return; }
+  await apiFetch(`/api/admin/matches/${MATCH_ID}/eval`, {
+    method: 'POST',
+    body: JSON.stringify({ player_id: playerId, scores: evalScores })
+  });
+  alert('Evaluare salvată!');
+}
+
+// Auto-refresh state every 5s
+async function pollState() {
+  const data = await apiFetch(`/api/admin/matches/${MATCH_ID}/live-state`);
+  if (!data) return;
+  const periods = data.period_data || [];
+  // Update inning inputs and totals
+  for (let i = 1; i <= innings; i++) {
+    const p = periods.find(x => x.inning === i);
+    const h = document.getElementById(`inp-home-${i}`);
+    const a = document.getElementById(`inp-away-${i}`);
+    if (h && document.activeElement !== h) h.value = p?.bottom ?? '';
+    if (a && document.activeElement !== a) a.value = p?.top ?? '';
+  }
+  document.getElementById('score-home').textContent = data.match.score_home ?? 0;
+  document.getElementById('score-away').textContent = data.match.score_away ?? 0;
+  document.getElementById('total-home').textContent = data.match.score_home ?? 0;
+  document.getElementById('total-away').textContent = data.match.score_away ?? 0;
+}
+
+// Poll only when LIVE
+const badge = document.getElementById('status-badge');
+function maybePoll() {
+  if (badge.dataset.status === 'LIVE') pollState();
+}
+setInterval(maybePoll, 5000);
+</script>

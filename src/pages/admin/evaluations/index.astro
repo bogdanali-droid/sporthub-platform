@@ -1,0 +1,125 @@
+---
+import AdminLayout from '@/layouts/AdminLayout.astro';
+if (!Astro.locals.user) return Astro.redirect('/login');
+
+const user = Astro.locals.user;
+const db = (Astro.locals as any).runtime?.env?.DB;
+
+import { queryAll } from '@/lib/db';
+import { getClubSportConfig } from '@/lib/sport-config';
+
+const sport = await getClubSportConfig(db, user.club_id!);
+
+// Aggregate in-match eval scores per player and attribute
+const matchEvals = await queryAll<any>(db,
+  `SELECT mes.player_id, p.first_name || ' ' || p.last_name AS player_name,
+     mes.eval_attr, ROUND(AVG(mes.score),1) AS avg_score, COUNT(*) AS cnt
+   FROM match_eval_scores mes
+   JOIN players p ON p.id = mes.player_id
+   JOIN matches m ON m.id = mes.match_id
+   WHERE m.club_id = ?
+   GROUP BY mes.player_id, mes.eval_attr
+   ORDER BY p.last_name, mes.eval_attr`, [user.club_id]);
+
+// Group by player
+const byPlayer: Record<string, { name: string; attrs: Record<string, { avg: number; cnt: number }> }> = {};
+for (const row of matchEvals) {
+  if (!byPlayer[row.player_id]) byPlayer[row.player_id] = { name: row.player_name, attrs: {} };
+  byPlayer[row.player_id].attrs[row.eval_attr] = { avg: row.avg_score, cnt: row.cnt };
+}
+
+const evalAttrs = sport?.evaluationAttributes ?? [];
+const players = Object.entries(byPlayer);
+
+const attrLabel: Record<string, string> = {};
+for (const a of evalAttrs) attrLabel[a.code] = a.name_ro;
+---
+
+<AdminLayout title="Evaluări Jucători" user={user} sportCode={sport?.code} sportIcon={sport?.icon}>
+
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Evaluări Jucători</h1>
+      <p class="page-sub">Note acordate în timpul meciurilor live</p>
+    </div>
+  </div>
+
+  {players.length === 0 ? (
+    <div class="empty-state">
+      <div class="empty-icon">⭐</div>
+      <h3>Nicio evaluare înregistrată</h3>
+      <p>Evaluările se acordă în pagina Live Scoring a unui meci.</p>
+      <a href="/admin/matches" class="btn-primary">Mergi la Meciuri</a>
+    </div>
+  ) : (
+    <div class="card">
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Jucător</th>
+              {evalAttrs.slice(0,6).map(a => <th title={a.name_ro}>{a.name_ro.split(' ').slice(0,2).join(' ')}</th>)}
+              <th>Media</th>
+            </tr>
+          </thead>
+          <tbody>
+            {players.map(([pid, data]) => {
+              const scores = evalAttrs.map(a => data.attrs[a.code]?.avg ?? null);
+              const validScores = scores.filter(s => s !== null) as number[];
+              const overall = validScores.length > 0
+                ? (validScores.reduce((a, b) => a + b, 0) / validScores.length).toFixed(1)
+                : '—';
+              return (
+                <tr>
+                  <td class="player-name">{data.name}</td>
+                  {evalAttrs.slice(0,6).map(a => {
+                    const val = data.attrs[a.code];
+                    return (
+                      <td class="score-cell">
+                        {val ? (
+                          <span class={`score-badge score-${Math.round(val.avg)}`}>
+                            {val.avg} <small>({val.cnt}x)</small>
+                          </span>
+                        ) : (
+                          <span class="score-na">—</span>
+                        )}
+                      </td>
+                    );
+                  })}
+                  <td class="overall-score">{overall}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )}
+
+</AdminLayout>
+
+<style>
+  .page-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px}
+  .page-title{font-size:20px;font-weight:700;color:#1e293b;margin:0}
+  .page-sub{font-size:13px;color:#64748b;margin:4px 0 0}
+  .card{background:#fff;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.07);padding:0;overflow:hidden}
+  .table-wrap{overflow-x:auto}
+  .table{width:100%;border-collapse:collapse;font-size:13px}
+  .table th{padding:10px 14px;border-bottom:2px solid #f1f5f9;color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase;text-align:left;white-space:nowrap}
+  .table td{padding:10px 14px;border-bottom:1px solid #f1f5f9}
+  .player-name{font-weight:600;color:#1e293b}
+  .score-cell{text-align:center}
+  .score-badge{display:inline-flex;align-items:center;gap:3px;padding:3px 8px;border-radius:12px;font-weight:600;font-size:12px}
+  .score-5{background:#dcfce7;color:#15803d}
+  .score-4{background:#d1fae5;color:#059669}
+  .score-3{background:#fef9c3;color:#92400e}
+  .score-2{background:#fee2e2;color:#b91c1c}
+  .score-1{background:#fee2e2;color:#991b1b}
+  .score-na{color:#cbd5e1}
+  .overall-score{font-weight:700;color:#0f172a;text-align:center}
+  .empty-state{text-align:center;padding:60px 20px;color:#64748b}
+  .empty-icon{font-size:48px;margin-bottom:12px}
+  .empty-state h3{font-size:18px;color:#1e293b;margin:0 0 8px}
+  .empty-state p{margin:0 0 20px;font-size:14px}
+  .btn-primary{display:inline-block;padding:10px 20px;background:#3b82f6;color:#fff;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px}
+</style>

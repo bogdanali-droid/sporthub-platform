@@ -1,0 +1,83 @@
+---
+export const prerender = false;
+import AdminLayout from '../../../layouts/AdminLayout.astro';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const db = (Astro.locals as any).runtime?.env?.DB;
+const clubId = user.club_id;
+const filter = Astro.url.searchParams.get('status') || '';
+
+let payments: any[] = [];
+try {
+  const q = filter
+    ? `SELECT p.*, pl.first_name, pl.last_name FROM payments p JOIN players pl ON pl.id=p.player_id WHERE p.club_id=? AND p.status=? ORDER BY p.created_at DESC LIMIT 100`
+    : `SELECT p.*, pl.first_name, pl.last_name FROM payments p JOIN players pl ON pl.id=p.player_id WHERE p.club_id=? ORDER BY p.created_at DESC LIMIT 100`;
+  const res = filter ? await db?.prepare(q).bind(clubId, filter).all() : await db?.prepare(q).bind(clubId).all();
+  payments = res?.results ?? [];
+} catch {}
+
+const total = payments.reduce((s: number, p: any) => s + (p.amount || 0), 0);
+const paid = payments.filter((p: any) => p.status === 'PAID').reduce((s: number, p: any) => s + (p.amount || 0), 0);
+const pending = payments.filter((p: any) => p.status === 'PENDING').length;
+---
+<AdminLayout title="Pl\u0103\u021bi">
+  <div style="margin-bottom:20px;display:flex;align-items:center;justify-content:space-between">
+    <div>
+      <h2 style="font-size:20px;font-weight:800">Pl\u0103\u021bi</h2>
+      <p style="color:#6b7280;font-size:13px">Cotizan\u021bie \u0219i pl\u0103\u021bi club</p>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px">
+    <div class="card" style="text-align:center">
+      <div style="font-size:24px;font-weight:800;color:#16a34a">{paid.toFixed(0)} RON</div>
+      <div style="font-size:13px;color:#6b7280">\u00cencasat</div>
+    </div>
+    <div class="card" style="text-align:center">
+      <div style="font-size:24px;font-weight:800;color:#f59e0b">{pending}</div>
+      <div style="font-size:13px;color:#6b7280">\u00een a\u0219teptare</div>
+    </div>
+    <div class="card" style="text-align:center">
+      <div style="font-size:24px;font-weight:800;color:#3b82f6">{total.toFixed(0)} RON</div>
+      <div style="font-size:13px;color:#6b7280">Total emis</div>
+    </div>
+  </div>
+
+  <div style="margin-bottom:16px;display:flex;gap:8px">
+    <a href="/admin/payments" class={`btn btn-sm ${!filter ? 'btn-primary' : 'btn-ghost'}`}>Toate</a>
+    <a href="/admin/payments?status=PENDING" class={`btn btn-sm ${filter==='PENDING' ? 'btn-primary' : 'btn-ghost'}`}>\u00cen a\u0219teptare</a>
+    <a href="/admin/payments?status=PAID" class={`btn btn-sm ${filter==='PAID' ? 'btn-primary' : 'btn-ghost'}`}>Pl\u0103tite</a>
+    <a href="/admin/payments?status=OVERDUE" class={`btn btn-sm ${filter==='OVERDUE' ? 'btn-primary' : 'btn-ghost'}`}>Rest\u0103n\u021be</a>
+  </div>
+
+  <div class="card" style="padding:0;overflow:hidden">
+    {payments.length === 0 ? (
+      <div style="padding:60px 24px;text-align:center;color:#9ca3af">
+        <div style="font-size:40px;margin-bottom:12px">\ud83d\udcb3</div>
+        <p style="font-weight:600">Nicio plat\u0103 \u00eenregistrat\u0103</p>
+      </div>
+    ) : (
+      <table class="table">
+        <thead><tr><th>Juc\u0103tor</th><th>Descriere</th><th>Sum\u0103</th><th>Scaden\u021b\u0103</th><th>Status</th></tr></thead>
+        <tbody>
+          {payments.map((p: any) => (
+            <tr>
+              <td style="font-weight:600">{p.first_name} {p.last_name}</td>
+              <td style="color:#6b7280">{p.description || '\u2014'}</td>
+              <td style="font-weight:700">{p.amount} {p.currency}</td>
+              <td style="font-size:13px;color:#6b7280">{p.due_date || '\u2014'}</td>
+              <td>
+                {p.status === 'PAID' && <span class="badge badge-green">Pl\u0103tit</span>}
+                {p.status === 'PENDING' && <span class="badge badge-yellow">\u00cen a\u0219teptare</span>}
+                {p.status === 'OVERDUE' && <span class="badge badge-red">Rest\u0103n\u021b\u0103</span>}
+                {p.status === 'CANCELLED' && <span class="badge">Anulat</span>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )}
+  </div>
+</AdminLayout>
