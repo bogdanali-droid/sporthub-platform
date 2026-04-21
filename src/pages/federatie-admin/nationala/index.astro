@@ -1,0 +1,135 @@
+---
+import FederatieLayout from '@/layouts/FederatieLayout.astro';
+if (!Astro.locals.user) return Astro.redirect('/login/federatie');
+
+const user = Astro.locals.user;
+const db = (Astro.locals as any).runtime?.env?.DB;
+
+import { queryAll } from '@/lib/db';
+
+const teams = await queryAll<any>(db,
+  `SELECT nt.*,
+    (SELECT COUNT(*) FROM national_team_players ntp WHERE ntp.team_id = nt.id AND ntp.status='ACTIVE') AS player_count
+   FROM national_teams nt
+   ORDER BY nt.sport_code, nt.age_group, nt.name`, []);
+
+const msg = Astro.url.searchParams.get('msg');
+
+const sportLabel: Record<string,string> = { BASEBALL5: 'Baseball5', SOFTBALL: 'Softball', BASEBALL: 'Baseball' };
+const genderLabel: Record<string,string> = { M: 'Masculin', F: 'Feminin', MIXED: 'Mixt' };
+---
+
+<FederatieLayout title="Echipe Naționale — FRBS" user={user} section="nationala">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
+    <div>
+      <h1 style="font-size:22px;font-weight:700;color:#1e293b">🇷🇴 Echipe Naționale</h1>
+      <p style="font-size:13px;color:#64748b;margin-top:2px">Loturi naționale FRBS — Baseball5 & Softball</p>
+    </div>
+    <button onclick="document.getElementById('modal-new-team').style.display='flex'"
+            class="btn btn-primary">+ Lotul nou</button>
+  </div>
+
+  {msg === 'created' && <div class="alert alert-success" style="margin-bottom:16px">Lotul a fost creat.</div>}
+
+  {teams.length === 0 ? (
+    <div class="card" style="text-align:center;padding:48px;color:#64748b">
+      <div style="font-size:48px;margin-bottom:12px">🇷🇴</div>
+      <p>Nu există loturi naționale definite încă.</p>
+      <p style="margin-top:8px;font-size:13px">Adaugă primul lot folosind butonul de mai sus.</p>
+    </div>
+  ) : (
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px">
+      {teams.map((t: any) => (
+        <div class="card" style="padding:20px">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px">
+            <div>
+              <div style="font-weight:700;font-size:15px;color:#1e293b">{t.name}</div>
+              <div style="font-size:12px;color:#64748b;margin-top:2px">
+                {sportLabel[t.sport_code] ?? t.sport_code}
+                {t.age_group ? ` · ${t.age_group}` : ''}
+                {t.gender ? ` · ${genderLabel[t.gender] ?? t.gender}` : ''}
+              </div>
+            </div>
+            <span class={`badge ${t.is_active ? 'badge-green' : 'badge-gray'}`}>
+              {t.is_active ? 'Activ' : 'Inactiv'}
+            </span>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
+            <div style="background:#f8fafc;padding:10px;border-radius:8px;text-align:center">
+              <div style="font-size:22px;font-weight:700;color:#1d4ed8">{t.player_count}</div>
+              <div style="font-size:11px;color:#64748b">Jucători</div>
+            </div>
+            <div style="background:#f8fafc;padding:10px;border-radius:8px;text-align:center">
+              <div style="font-size:14px;font-weight:600;color:#374151">{t.season ?? '—'}</div>
+              <div style="font-size:11px;color:#64748b">Sezon</div>
+            </div>
+          </div>
+
+          {t.coach_name && (
+            <div style="font-size:12px;color:#64748b;margin-bottom:12px">
+              👔 Antrenor: <strong>{t.coach_name}</strong>
+            </div>
+          )}
+
+          <a href={`/federatie-admin/nationala/${t.id}`} class="btn btn-secondary" style="width:100%;text-align:center">
+            Gestionare lot →
+          </a>
+        </div>
+      ))}
+    </div>
+  )}
+
+  <!-- Modal: New team -->
+  <div id="modal-new-team" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;align-items:center;justify-content:center">
+    <div class="card" style="width:100%;max-width:500px;padding:32px;position:relative">
+      <button onclick="document.getElementById('modal-new-team').style.display='none'"
+              style="position:absolute;top:16px;right:16px;background:none;border:none;font-size:20px;cursor:pointer;color:#64748b">×</button>
+      <h2 style="font-size:18px;font-weight:700;margin-bottom:20px">Lot Național Nou</h2>
+      <form method="POST" action="/api/federatie-admin/nationala/create">
+        <div class="form-group">
+          <label class="form-label">Denumire lot *</label>
+          <input type="text" name="name" class="form-input" required placeholder="ex: Lot Național Baseball5 Seniori Masculin" />
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-group">
+            <label class="form-label">Sport *</label>
+            <select name="sport_code" class="form-input" required>
+              <option value="BASEBALL5">Baseball5</option>
+              <option value="SOFTBALL">Softball</option>
+              <option value="BASEBALL">Baseball</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Gen</label>
+            <select name="gender" class="form-input">
+              <option value="">—</option>
+              <option value="M">Masculin</option>
+              <option value="F">Feminin</option>
+              <option value="MIXED">Mixt</option>
+            </select>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-group">
+            <label class="form-label">Categorie vârstă</label>
+            <input type="text" name="age_group" class="form-input" placeholder="OPEN / U18 / U15..." />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Sezon</label>
+            <input type="text" name="season" class="form-input" placeholder="2025" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Antrenor principal</label>
+          <input type="text" name="coach_name" class="form-input" placeholder="Nume antrenor" />
+        </div>
+        <div style="display:flex;gap:10px;margin-top:8px">
+          <button type="submit" class="btn btn-primary" style="flex:1">Creare lot</button>
+          <button type="button" onclick="document.getElementById('modal-new-team').style.display='none'"
+                  class="btn btn-secondary" style="flex:1">Anulare</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</FederatieLayout>

@@ -43,9 +43,25 @@ export const onRequest = defineMiddleware(async (context, next) => {
   }
 
   const env = (locals as any).runtime?.env;
-  if (!env) return next();
 
-  const session = await getSession(sessionToken, env);
+  // Dacă SESSION_KV nu e configurat, tratăm ca sesiune invalidă
+  if (!env?.SESSION_KV) {
+    cookies.delete('session', { path: '/' });
+    if (url.pathname.startsWith('/api/')) {
+      return new Response(JSON.stringify({ error: 'Service unavailable — bindings not configured' }), { status: 503, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (url.pathname.startsWith('/federatie-admin') || url.pathname.startsWith('/asociatie-admin')) {
+      return redirect('/login/federatie');
+    }
+    return redirect('/login');
+  }
+
+  let session = null;
+  try {
+    session = await getSession(sessionToken, env);
+  } catch {
+    cookies.delete('session', { path: '/' });
+  }
 
   if (!session) {
     cookies.delete('session', { path: '/' });

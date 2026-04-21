@@ -219,6 +219,9 @@ const currentPath = Astro.url.pathname;
   </nav>
 
   <div class="sidebar-footer">
+    {user?.role === 'SUPERADMIN' && (
+      <a href="/portal-select" style="color:#F4B400">🏛️ Schimbă portalul</a>
+    )}
     <a href="/api/auth/logout">🚪 Deconectare</a>
   </div>
 </aside>

@@ -1,0 +1,225 @@
+---
+import type { SessionUser } from '@/lib/auth';
+
+const user = Astro.locals.user as SessionUser | null;
+if (!user) return Astro.redirect('/login');
+
+// Redirect non-superadmin to their home portal
+const role = user.role;
+if (role === 'PARENT') return Astro.redirect('/parent');
+if (role === 'PLAYER') return Astro.redirect('/player');
+if (role === 'FEDERATION_ADMIN') return Astro.redirect('/federatie-admin');
+if (role === 'ASSOCIATION_ADMIN') return Astro.redirect('/asociatie-admin');
+if (role !== 'SUPERADMIN' && role !== 'ADMIN' && role !== 'COACH') {
+  return Astro.redirect('/admin');
+}
+
+const portals = [
+  {
+    href: '/admin',
+    icon: '🏟️',
+    title: 'Portal Club',
+    subtitle: 'Admin Club Demo Baseball5',
+    description: 'Gestionare jucători, echipe, antrenamente, meciuri, plăți, medical și evaluări.',
+    color: '#0f4c81',
+    accent: '#1565c0',
+    badge: 'CLUB ADMIN',
+    badgeColor: '#e3f2fd',
+    badgeText: '#0f4c81',
+    visible: ['SUPERADMIN','ADMIN','COACH'].includes(role),
+  },
+  {
+    href: '/federatie-admin',
+    icon: '🏛️',
+    title: 'Portal Federație',
+    subtitle: 'FRBS — Baseball & Softball',
+    description: 'Legitimări, transferuri, cereri cluburi, arbitri, competiții naționale și loturi.',
+    color: '#001524',
+    accent: '#F4B400',
+    badge: 'FEDERATION',
+    badgeColor: '#fff8e1',
+    badgeText: '#b45309',
+    visible: ['SUPERADMIN', 'FEDERATION_ADMIN'].includes(role),
+  },
+  {
+    href: '/asociatie-admin',
+    icon: '🗺️',
+    title: 'Portal Asociație',
+    subtitle: 'Asociații Județene',
+    description: 'Cluburi afiliate, legitimări județene, transferuri locale și competiții regionale.',
+    color: '#431407',
+    accent: '#f97316',
+    badge: 'ASOCIAȚIE',
+    badgeColor: '#fff7ed',
+    badgeText: '#9a3412',
+    visible: ['SUPERADMIN', 'ASSOCIATION_ADMIN', 'FEDERATION_ADMIN'].includes(role),
+  },
+];
+const visiblePortals = portals.filter(p => p.visible);
+---
+
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Selectare Portal — SportHub</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', sans-serif;
+      min-height: 100vh;
+      background: linear-gradient(135deg, #0a1929 0%, #0f3460 50%, #1a237e 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 32px 20px;
+    }
+    .header {
+      text-align: center;
+      margin-bottom: 48px;
+      color: #fff;
+    }
+    .header .logo { font-size: 48px; margin-bottom: 12px; }
+    .header h1 { font-size: 28px; font-weight: 800; letter-spacing: -.5px; }
+    .header p { font-size: 15px; color: #94a3b8; margin-top: 8px; }
+    .user-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(255,255,255,.1);
+      border: 1px solid rgba(255,255,255,.2);
+      border-radius: 999px;
+      padding: 6px 16px;
+      color: #e2e8f0;
+      font-size: 13px;
+      margin-top: 16px;
+    }
+    .portals {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 24px;
+      width: 100%;
+      max-width: 960px;
+    }
+    .portal-card {
+      background: #fff;
+      border-radius: 20px;
+      overflow: hidden;
+      box-shadow: 0 20px 60px rgba(0,0,0,.3);
+      text-decoration: none;
+      color: inherit;
+      transition: transform .2s, box-shadow .2s;
+      display: flex;
+      flex-direction: column;
+    }
+    .portal-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 28px 72px rgba(0,0,0,.4);
+    }
+    .portal-header {
+      padding: 32px 28px 24px;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+    }
+    .portal-icon {
+      width: 64px; height: 64px;
+      border-radius: 16px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 32px;
+    }
+    .portal-badge {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      padding: 4px 10px;
+      border-radius: 999px;
+    }
+    .portal-body {
+      padding: 0 28px 28px;
+      flex: 1;
+    }
+    .portal-body h2 {
+      font-size: 20px;
+      font-weight: 700;
+      color: #0f172a;
+      margin-bottom: 4px;
+    }
+    .portal-body .subtitle {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      margin-bottom: 12px;
+    }
+    .portal-body p {
+      font-size: 14px;
+      color: #64748b;
+      line-height: 1.6;
+    }
+    .portal-footer {
+      padding: 16px 28px;
+      border-top: 1px solid #f1f5f9;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .arrow { font-size: 18px; transition: transform .2s; }
+    .portal-card:hover .arrow { transform: translateX(4px); }
+    .logout-link {
+      color: #94a3b8;
+      font-size: 13px;
+      text-decoration: none;
+      margin-top: 36px;
+    }
+    .logout-link:hover { color: #e2e8f0; }
+    @media (max-width: 640px) {
+      .portals { grid-template-columns: 1fr; }
+      .header h1 { font-size: 22px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="logo">🏟️</div>
+    <h1>SportHub — Selectare Portal</h1>
+    <p>Alege modulul pe care vrei să îl accesezi</p>
+    <div class="user-chip">
+      👤 {user.first_name ?? ''} {user.last_name ?? user.email}
+      &nbsp;·&nbsp;
+      <strong>{role}</strong>
+    </div>
+  </div>
+
+  <div class="portals">
+    {visiblePortals.map(p => (
+      <a href={p.href} class="portal-card">
+        <div class="portal-header">
+          <div class="portal-icon" style={`background:${p.color}22`}>
+            {p.icon}
+          </div>
+          <span class="portal-badge" style={`background:${p.badgeColor};color:${p.badgeText}`}>
+            {p.badge}
+          </span>
+        </div>
+        <div class="portal-body">
+          <h2>{p.title}</h2>
+          <div class="subtitle" style={`color:${p.color}`}>{p.subtitle}</div>
+          <p>{p.description}</p>
+        </div>
+        <div class="portal-footer" style={`color:${p.color}`}>
+          <span>Intră în portal</span>
+          <span class="arrow">→</span>
+        </div>
+      </a>
+    ))}
+  </div>
+
+  <a href="/api/auth/logout" class="logout-link">🚪 Deconectare</a>
+</body>
+</html>

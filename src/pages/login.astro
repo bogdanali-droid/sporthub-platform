@@ -1,5 +1,11 @@
 ---
-if (Astro.locals.user) return Astro.redirect('/admin');
+if (Astro.locals.user) {
+  const r = Astro.locals.user.role;
+  if (r === 'SUPERADMIN') return Astro.redirect('/portal-select');
+  if (r === 'PARENT') return Astro.redirect('/parent');
+  if (r === 'PLAYER') return Astro.redirect('/player');
+  return Astro.redirect('/admin');
+}
 
 let error = '';
 if (Astro.request.method === 'POST') {
@@ -16,6 +22,10 @@ if (Astro.request.method === 'POST') {
         path: '/', httpOnly: true, secure: true, sameSite: 'lax',
         maxAge: 7 * 24 * 3600,
       });
+      const role = result.user.role;
+      if (role === 'SUPERADMIN') return Astro.redirect('/portal-select');
+      if (role === 'PARENT') return Astro.redirect('/parent');
+      if (role === 'PLAYER') return Astro.redirect('/player');
       return Astro.redirect('/admin');
     }
     error = 'Email sau parolă incorectă.';
