@@ -1,0 +1,120 @@
+---
+import FederatieLayout from '@/layouts/FederatieLayout.astro';
+if (!Astro.locals.user) return Astro.redirect('/login/federatie');
+
+const user = Astro.locals.user;
+const db = (Astro.locals as any).runtime?.env?.DB;
+
+import { queryFirst, queryAll } from '@/lib/db';
+
+// KPI stats
+const stats = await queryFirst<any>(db,
+  `SELECT
+    (SELECT COUNT(*) FROM player_legitimations WHERE status='ACTIVE') AS legitimati,
+    (SELECT COUNT(*) FROM player_legitimations WHERE status='PENDING') AS pending_leg,
+    (SELECT COUNT(*) FROM federation_requests WHERE status IN ('PENDING','IN_REVIEW')) AS cereri_open,
+    (SELECT COUNT(*) FROM player_transfers WHERE status='PENDING') AS transferuri_pending,
+    (SELECT COUNT(*) FROM clubs WHERE is_active=1) AS cluburi,
+    (SELECT COUNT(*) FROM players WHERE legitimation_status='LEGITIMAT') AS jucatori_legitimati
+  `, []);
+
+// Transfer window check
+function isTransferWindowOpen(): { open: boolean; label: string } {
+  const now = new Date();
+  const m = now.getMonth() + 1;
+  const d = now.getDate();
+  if (m === 1) return { open: true, label: 'Fereastra Ianuarie (1-31 ian)' };
+  if ((m === 6 && d >= 15) || m === 7 || (m === 8 && d <= 15))
+    return { open: true, label: 'Fereastra Vară (15 iun - 15 aug)' };
+  return { open: false, label: 'Fereastra de transfer închisă' };
+}
+const transferWindow = isTransferWindowOpen();
+
+const recentCereri = await queryAll<any>(db,
+  `SELECT fr.*, c.name AS club_name, p.first_name || ' ' || p.last_name AS player_name
+   FROM federation_requests fr
+   JOIN clubs c ON c.id = fr.club_id
+   LEFT JOIN players p ON p.id = fr.player_id
+   WHERE fr.status IN ('PENDING','IN_REVIEW','INFO_NEEDED')
+   ORDER BY fr.created_at DESC LIMIT 8`, []);
+
+const statusBadge: Record<string,string> = { PENDING:'badge-yellow', IN_REVIEW:'badge-blue', INFO_NEEDED:'badge-gold' };
+const statusLabel: Record<string,string> = { PENDING:'Nou', IN_REVIEW:'În analiză', INFO_NEEDED:'Info' };
+---
+
+<FederatieLayout title="Dashboard FRBS" user={user} section="CCLTC">
+
+  <div style="margin-bottom:24px">
+    <h1 style="font-size:22px;font-weight:700;color:#1e293b">Dashboard Federație</h1>
+    <p style="font-size:13px;color:#64748b;margin-top:2px">
+      Bun venit, {user.first_name ?? user.email} — Federația Română de Baseball și Softball
+    </p>
+  </div>
+
+  <!-- Transfer window banner -->
+  <div class={`alert ${transferWindow.open ? 'alert-success' : 'alert-warning'}`} style="margin-bottom:20px">
+    <strong>{transferWindow.open ? '🟢' : '🔴'} {transferWindow.label}</strong>
+    {transferWindow.open
+      ? ' — Cererile de transfer pot fi procesate acum.'
+      : ' — Cererile de transfer sunt blocate în afara ferestrei.'}
+  </div>
+
+  <!-- KPI cards -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:24px">
+    <div class="stat-card">
+      <div style="font-size:28px;font-weight:700;color:#166534">{stats?.legitimati ?? 0}</div>
+      <div style="font-size:12px;color:#64748b;margin-top:4px">Jucători legitimați activi</div>
+    </div>
+    <div class="stat-card">
+      <div style="font-size:28px;font-weight:700;color:#854d0e">{stats?.pending_leg ?? 0}</div>
+      <div style="font-size:12px;color:#64748b;margin-top:4px">Legitimări în așteptare</div>
+    </div>
+    <div class="stat-card">
+      <div style="font-size:28px;font-weight:700;color:#1d4ed8">{stats?.cereri_open ?? 0}</div>
+      <div style="font-size:12px;color:#64748b;margin-top:4px">Cereri deschise</div>
+    </div>
+    <div class="stat-card">
+      <div style="font-size:28px;font-weight:700;color:#92400e">{stats?.transferuri_pending ?? 0}</div>
+      <div style="font-size:12px;color:#64748b;margin-top:4px">Transferuri pending</div>
+    </div>
+    <div class="stat-card">
+      <div style="font-size:28px;font-weight:700;color:#001524">{stats?.cluburi ?? 0}</div>
+      <div style="font-size:12px;color:#64748b;margin-top:4px">Cluburi active</div>
+    </div>
+    <div class="stat-card">
+      <div style="font-size:28px;font-weight:700;color:#001524">{stats?.jucatori_legitimati ?? 0}</div>
+      <div style="font-size:12px;color:#64748b;margin-top:4px">Total jucători legitimați</div>
+    </div>
+  </div>
+
+  <!-- Cereri recente -->
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">Cereri care necesită acțiune</span>
+      <a href="/federatie-admin/cereri" class="btn btn-outline btn-sm">Vezi toate →</a>
+    </div>
+    {recentCereri.length === 0 ? (
+      <p style="color:#64748b;font-size:14px;text-align:center;padding:20px 0">Nu există cereri deschise.</p>
+    ) : (
+      <table class="table">
+        <thead>
+          <tr><th>Club</th><th>Tip</th><th>Subiect</th><th>Jucător</th><th>Status</th><th>Data</th><th></th></tr>
+        </thead>
+        <tbody>
+          {recentCereri.map((c: any) => (
+            <tr>
+              <td style="font-weight:500">{c.club_name}</td>
+              <td><span class="badge badge-gray">{c.request_type}</span></td>
+              <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{c.subject}</td>
+              <td>{c.player_name ?? '—'}</td>
+              <td><span class={`badge ${statusBadge[c.status] ?? 'badge-gray'}`}>{statusLabel[c.status] ?? c.status}</span></td>
+              <td style="color:#64748b;font-size:12px">{c.created_at?.slice(0,10)}</td>
+              <td><a href={`/federatie-admin/cereri/${c.id}`} class="btn btn-outline btn-sm">Deschide</a></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )}
+  </div>
+
+</FederatieLayout>

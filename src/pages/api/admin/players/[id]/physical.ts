@@ -4,13 +4,13 @@ import { queryFirst, execute } from '@/lib/db';
 export const prerender = false;
 
 export async function POST({ params, request, locals }: APIContext) {
-  const session = locals.session;
+  const session = { user: locals.user, clubId: locals.user?.club_id };
   if (!session) return new Response('Unauthorized', { status: 401 });
-  const db = locals.db as D1Database;
+  const db = (locals as any).runtime?.env?.DB;
   const { id } = params;
 
   const player = await queryFirst<any>(db,
-    'SELECT id FROM players WHERE id = ? AND club_id = ?', [id, session.clubId]
+    'SELECT id FROM players WHERE id = ? AND club_id = ?', [id, locals.user?.club_id]
   );
   if (!player) return new Response('Not found', { status: 404 });
 
@@ -24,21 +24,21 @@ export async function POST({ params, request, locals }: APIContext) {
        push_ups, pull_ups, yo_yo_test, notes, created_by)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, [
-    testId, id, session.clubId, body.test_date,
+    testId, id, locals.user?.club_id, body.test_date,
     body.height_cm ?? null, body.weight_kg ?? null,
     body.sprint_10m ?? null, body.sprint_30m ?? null, body.sprint_50m ?? null,
     body.broad_jump ?? null, body.push_ups ?? null, body.pull_ups ?? null,
-    body.yo_yo_test ?? null, body.notes ?? null, session.userId
+    body.yo_yo_test ?? null, body.notes ?? null, locals.user?.id
   ]);
 
   return new Response(JSON.stringify({ ok: true, id: testId }), { headers: { 'Content-Type': 'application/json' } });
 }
 
 export async function DELETE({ request, locals }: APIContext) {
-  const session = locals.session;
+  const session = { user: locals.user, clubId: locals.user?.club_id };
   if (!session) return new Response('Unauthorized', { status: 401 });
-  const db = locals.db as D1Database;
+  const db = (locals as any).runtime?.env?.DB;
   const body = await request.json() as any;
-  await execute(db, 'DELETE FROM physical_tests WHERE id = ? AND club_id = ?', [body.test_id, session.clubId]);
+  await execute(db, 'DELETE FROM physical_tests WHERE id = ? AND club_id = ?', [body.test_id, locals.user?.club_id]);
   return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } });
 }

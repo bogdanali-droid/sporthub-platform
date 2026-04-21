@@ -4,15 +4,15 @@ import { queryFirst, execute } from '@/lib/db';
 export const prerender = false;
 
 export async function PUT({ params, request, locals }: APIContext) {
-  const session = locals.session;
+  const session = { user: locals.user, clubId: locals.user?.club_id };
   if (!session) return new Response('Unauthorized', { status: 401 });
 
-  const db = locals.db as D1Database;
+  const db = (locals as any).runtime?.env?.DB;
   const { id } = params;
 
   const player = await queryFirst<any>(db,
     'SELECT id FROM players WHERE id = ? AND club_id = ?',
-    [id, session.clubId]
+    [id, locals.user?.club_id]
   );
   if (!player) return new Response('Not found', { status: 404 });
 
@@ -47,7 +47,7 @@ export async function PUT({ params, request, locals }: APIContext) {
     guardian2_name ?? null, guardian2_email ?? null, guardian2_phone ?? null,
     emergency_contact ?? null, emergency_phone ?? null,
     notes ?? null, joined_club_at ?? null,
-    id, session.clubId
+    id, locals.user?.club_id
   ]);
 
   if (team_id !== undefined) {
@@ -68,10 +68,10 @@ export async function PUT({ params, request, locals }: APIContext) {
 }
 
 export async function DELETE({ params, locals }: APIContext) {
-  const session = locals.session;
+  const session = { user: locals.user, clubId: locals.user?.club_id };
   if (!session) return new Response('Unauthorized', { status: 401 });
-  const db = locals.db as D1Database;
+  const db = (locals as any).runtime?.env?.DB;
   const { id } = params;
-  await execute(db, 'DELETE FROM players WHERE id = ? AND club_id = ?', [id, session.clubId]);
+  await execute(db, 'DELETE FROM players WHERE id = ? AND club_id = ?', [id, locals.user?.club_id]);
   return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } });
 }

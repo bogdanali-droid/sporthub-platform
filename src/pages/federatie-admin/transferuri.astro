@@ -1,0 +1,170 @@
+---
+import FederatieLayout from '@/layouts/FederatieLayout.astro';
+if (!Astro.locals.user) return Astro.redirect('/login/federatie');
+
+const user = Astro.locals.user;
+const db = (Astro.locals as any).runtime?.env?.DB;
+
+import { queryAll } from '@/lib/db';
+
+function getTransferWindow(): { open: boolean; label: string; window: string | null } {
+  const now = new Date();
+  const m = now.getMonth() + 1;
+  const d = now.getDate();
+  if (m === 1) return { open: true, label: 'Fereastra Ianuarie (1–31 ianuarie)', window: 'JAN' };
+  if ((m === 6 && d >= 15) || m === 7 || (m === 8 && d <= 15))
+    return { open: true, label: 'Fereastra Vară (15 iunie – 15 august)', window: 'JUN_AUG' };
+  return { open: false, label: 'Fereastra de transfer este ÎNCHISĂ', window: null };
+}
+const tw = getTransferWindow();
+
+const filterStatus = Astro.url.searchParams.get('status') ?? '';
+const params: any[] = [];
+let where = 'WHERE 1=1';
+if (filterStatus) { where += ' AND pt.status = ?'; params.push(filterStatus); }
+
+const transferuri = await queryAll<any>(db,
+  `SELECT pt.*,
+     p.first_name || ' ' || p.last_name AS player_name,
+     fc.name AS from_club_name, tc.name AS to_club_name
+   FROM player_transfers pt
+   JOIN players p ON p.id = pt.player_id
+   LEFT JOIN clubs fc ON fc.id = pt.from_club_id
+   JOIN clubs tc ON tc.id = pt.to_club_id
+   ${where}
+   ORDER BY pt.created_at DESC LIMIT 100`, params);
+
+const msg = Astro.url.searchParams.get('msg');
+
+const statusBadge: Record<string,string> = {
+  PENDING:'badge-yellow', APPROVED:'badge-green', REJECTED:'badge-red', CANCELLED:'badge-gray', RETURNED:'badge-gray'
+};
+const statusLabel: Record<string,string> = {
+  PENDING:'Pending', APPROVED:'Aprobat', REJECTED:'Respins', CANCELLED:'Anulat', RETURNED:'Returnat'
+};
+---
+
+<FederatieLayout title="Transferuri" user={user} section="CCLTC">
+
+  <div style="margin-bottom:20px">
+    <h1 style="font-size:20px;font-weight:700;color:#1e293b">Transferuri Jucători</h1>
+    <p style="font-size:13px;color:#64748b">Procesare transferuri conform regulamentului FRBS</p>
+  </div>
+
+  <!-- Fereastră transfer banner -->
+  <div class={`alert ${tw.open ? 'alert-success' : 'alert-warning'}`} style="margin-bottom:20px;display:flex;align-items:center;justify-content:space-between">
+    <div>
+      <strong>{tw.open ? '🟢' : '🔴'} {tw.label}</strong>
+      {!tw.open && (
+        <p style="font-size:12px;margin-top:4px">
+          Transferuri valide: <strong>1–31 Ianuarie</strong> și <strong>15 Iunie – 15 August</strong>
+        </p>
+      )}
+    </div>
+    {tw.open && (
+      <button class="btn btn-gold btn-sm" onclick="document.getElementById('modal-transfer').classList.add('open')">
+        + Transfer nou
+      </button>
+    )}
+  </div>
+
+  {msg === 'aprobat' && <div class="alert alert-success">Transferul a fost aprobat.</div>}
+  {msg === 'respins' && <div class="alert alert-error">Transferul a fost respins.</div>}
+
+  <form method="GET" style="display:flex;gap:10px;margin-bottom:16px">
+    <select name="status" class="form-select" style="width:180px" onchange="this.form.submit()">
+      <option value="">Toate statusurile</option>
+      <option value="PENDING" selected={filterStatus==='PENDING'}>Pending</option>
+      <option value="APPROVED" selected={filterStatus==='APPROVED'}>Aprobate</option>
+      <option value="REJECTED" selected={filterStatus==='REJECTED'}>Respinse</option>
+    </select>
+  </form>
+
+  <div class="card">
+    <table class="table">
+      <thead>
+        <tr><th>Jucător</th><th>De la club</th><th>La club</th><th>Sport</th><th>Tip</th><th>Fereastră</th><th>Status</th><th>Data</th><th></th></tr>
+      </thead>
+      <tbody>
+        {transferuri.length === 0 && (
+          <tr><td colspan="9" style="text-align:center;color:#64748b;padding:24px">Nu există transferuri.</td></tr>
+        )}
+        {transferuri.map((t: any) => (
+          <tr>
+            <td style="font-weight:500">{t.player_name}</td>
+            <td>{t.from_club_name ?? '—'}</td>
+            <td>{t.to_club_name}</td>
+            <td><span class="badge badge-blue">{t.sport_code}</span></td>
+            <td>{t.transfer_type}</td>
+            <td><span class="badge badge-gray">{t.transfer_window ?? '—'}</span></td>
+            <td><span class={`badge ${statusBadge[t.status] ?? 'badge-gray'}`}>{statusLabel[t.status] ?? t.status}</span></td>
+            <td style="font-size:12px;color:#64748b">{t.created_at?.slice(0,10)}</td>
+            <td style="display:flex;gap:4px">
+              {t.status === 'PENDING' && (
+                <>
+                  <form method="POST" action="/api/federatie-admin/transferuri/approve" style="display:inline">
+                    <input type="hidden" name="id" value={t.id} />
+                    <button type="submit" class="btn btn-gold btn-sm">Aprobă</button>
+                  </form>
+                  <form method="POST" action="/api/federatie-admin/transferuri/reject" style="display:inline">
+                    <input type="hidden" name="id" value={t.id} />
+                    <button type="submit" class="btn btn-outline btn-sm" onclick="return confirm('Respingi transferul?')">Respinge</button>
+                  </form>
+                </>
+              )}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Modal transfer nou -->
+  <div class="modal-overlay" id="modal-transfer">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">Inițiere transfer manual</span>
+        <button class="modal-close" onclick="document.getElementById('modal-transfer').classList.remove('open')">✕</button>
+      </div>
+      <form method="POST" action="/api/federatie-admin/transferuri/create">
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">ID Jucător</label>
+            <input type="text" name="player_id" class="form-input" required placeholder="UUID jucător" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Club sursă (ID)</label>
+            <input type="text" name="from_club_id" class="form-input" placeholder="UUID club actual" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Club destinație (ID)</label>
+            <input type="text" name="to_club_id" class="form-input" required placeholder="UUID club nou" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Sport</label>
+            <select name="sport_code" class="form-select">
+              <option value="BASEBALL5">Baseball5</option>
+              <option value="SOFTBALL">Softball</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Tip transfer</label>
+            <select name="transfer_type" class="form-select">
+              <option value="PERMANENT">Permanent</option>
+              <option value="LOAN">Împrumut</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Note</label>
+            <textarea name="notes" class="form-textarea" rows="2"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" onclick="document.getElementById('modal-transfer').classList.remove('open')">Anulează</button>
+          <button type="submit" class="btn btn-gold">Creează transfer</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+</FederatieLayout>

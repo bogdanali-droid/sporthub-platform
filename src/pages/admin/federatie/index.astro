@@ -1,0 +1,214 @@
+---
+import AdminLayout from '@/layouts/AdminLayout.astro';
+if (!Astro.locals.user) return Astro.redirect('/login');
+
+const user = Astro.locals.user;
+const env = (Astro.locals as any).runtime?.env;
+const db = env?.DB;
+
+import { queryAll, queryFirst } from '@/lib/db';
+import { getClubSportConfig } from '@/lib/sport-config';
+
+const sport = await getClubSportConfig(db, user.club_id!);
+
+const [cereri, legitimari, anunturi] = await Promise.all([
+  queryAll<any>(db,
+    `SELECT fr.*, p.first_name || ' ' || p.last_name AS player_name
+     FROM federation_requests fr
+     LEFT JOIN players p ON p.id = fr.player_id
+     WHERE fr.club_id = ? ORDER BY fr.created_at DESC LIMIT 20`,
+    [user.club_id]),
+  queryAll<any>(db,
+    `SELECT pl.*, p.first_name, p.last_name
+     FROM player_legitimations pl
+     JOIN players p ON p.id = pl.player_id
+     WHERE pl.club_id = ? AND pl.status IN ('ACTIVE','PENDING')
+     ORDER BY pl.created_at DESC`,
+    [user.club_id]),
+  queryAll<any>(db,
+    `SELECT * FROM federation_announcements
+     WHERE (target = 'ALL' OR target = 'CLUBS') AND is_published = 1
+     AND (expires_at IS NULL OR expires_at > date('now'))
+     ORDER BY published_at DESC LIMIT 5`,
+    []),
+]);
+
+const statusBadge: Record<string, string> = {
+  PENDING: 'badge-yellow', IN_REVIEW: 'badge-blue', APPROVED: 'badge-green',
+  REJECTED: 'badge-red', INFO_NEEDED: 'badge-gold',
+};
+const statusLabel: Record<string, string> = {
+  PENDING: 'În așteptare', IN_REVIEW: 'În analiză', APPROVED: 'Aprobat',
+  REJECTED: 'Respins', INFO_NEEDED: 'Info necesară',
+};
+const typeLabel: Record<string, string> = {
+  LEGITIMARE: 'Legitimare', TRANSFER: 'Transfer', DEZLEGARE: 'Dezlegare',
+  DUBLA_LEGITIMARE: 'Dublă legitimare', SUSPENDARE: 'Suspendare',
+  CONTESTATIE: 'Contestație', MODIFICARE_DATE: 'Modificare date', ALTELE: 'Altele',
+};
+---
+
+<AdminLayout title="Portal Federație" user={user} sportCode={sport?.code} sportIcon={sport?.icon}>
+
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+    <div>
+      <h2 style="font-size:20px;font-weight:700;color:#1e293b">Portal Federație FRBS</h2>
+      <p style="font-size:13px;color:#64748b;margin-top:2px">Gestionează cererile și legitimările cu CCLTC</p>
+    </div>
+    <button class="btn btn-primary" onclick="document.getElementById('modal-cerere').classList.add('open')">
+      + Cerere nouă
+    </button>
+  </div>
+
+  <!-- Anunțuri FRBS -->
+  {anunturi.length > 0 && (
+    <div style="margin-bottom:20px">
+      {anunturi.map((a: any) => (
+        <div class={`alert ${a.type === 'URGENT' ? 'alert-warning' : 'alert-info'}`} style="margin-bottom:8px">
+          <strong>{a.type === 'URGENT' ? '🚨 ' : 'ℹ️ '}{a.title}</strong>
+          <p style="margin-top:4px;font-size:13px">{a.content}</p>
+        </div>
+      ))}
+    </div>
+  )}
+
+  <div style="display:grid;grid-template-columns:1fr 320px;gap:20px">
+
+    <!-- Cereri -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Cereri trimise ({cereri.length})</span>
+      </div>
+      {cereri.length === 0 ? (
+        <p style="color:#64748b;font-size:14px;padding:20px 0;text-align:center">Nu există cereri trimise.</p>
+      ) : (
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Tip</th><th>Subiect</th><th>Jucător</th><th>Status</th><th>Data</th><th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {cereri.map((c: any) => (
+              <tr>
+                <td><span class="badge badge-gray">{typeLabel[c.request_type] ?? c.request_type}</span></td>
+                <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{c.subject}</td>
+                <td>{c.player_name ?? '—'}</td>
+                <td><span class={`badge ${statusBadge[c.status] ?? 'badge-gray'}`}>{statusLabel[c.status] ?? c.status}</span></td>
+                <td style="color:#64748b;font-size:12px">{c.created_at?.slice(0,10)}</td>
+                <td><a href={`/admin/federatie/cereri/${c.id}`} class="btn btn-outline btn-sm">Detalii</a></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+
+    <!-- Legitimări active -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Legitimări active</span>
+      </div>
+      {legitimari.length === 0 ? (
+        <p style="color:#64748b;font-size:13px;padding:10px 0">Niciun jucător legitimat.</p>
+      ) : (
+        <div style="display:flex;flex-direction:column;gap:8px">
+          {legitimari.map((l: any) => (
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:8px;background:#f8fafc;border-radius:6px">
+              <div>
+                <div style="font-size:13px;font-weight:500">{l.first_name} {l.last_name}</div>
+                <div style="font-size:11px;color:#64748b">{l.license_number ?? 'fără nr.'}</div>
+              </div>
+              <span class={`badge ${l.status === 'ACTIVE' ? 'badge-green' : 'badge-yellow'}`}>
+                {l.status === 'ACTIVE' ? 'Activ' : 'Pending'}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+
+  </div>
+
+  <!-- Modal cerere nouă -->
+  <div class="modal-overlay" id="modal-cerere">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">Cerere nouă către FRBS</span>
+        <button class="modal-close" onclick="document.getElementById('modal-cerere').classList.remove('open')">✕</button>
+      </div>
+      <form method="POST" action="/api/admin/federatie/cereri/create">
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">Tip cerere</label>
+            <select name="request_type" class="form-select" required>
+              <option value="">— selectează —</option>
+              <option value="LEGITIMARE">Legitimare jucător</option>
+              <option value="TRANSFER">Transfer jucător</option>
+              <option value="DEZLEGARE">Dezlegare jucător</option>
+              <option value="DUBLA_LEGITIMARE">Dublă legitimare</option>
+              <option value="CONTESTATIE">Contestație</option>
+              <option value="MODIFICARE_DATE">Modificare date</option>
+              <option value="ALTELE">Altele</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Jucător (opțional)</label>
+            <select name="player_id" class="form-select">
+              <option value="">— fără jucător specific —</option>
+              {/* populated via JS if needed */}
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Subiect</label>
+            <input type="text" name="subject" class="form-input" required placeholder="Ex: Legitimare Ion Popescu — Baseball5 U15" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Descriere</label>
+            <textarea name="description" class="form-textarea" rows="4" placeholder="Detalii cerere..."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" onclick="document.getElementById('modal-cerere').classList.remove('open')">Anulează</button>
+          <button type="submit" class="btn btn-primary">Trimite cerere</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+</AdminLayout>
+
+<style>
+  .card { background:#fff;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,.06);padding:20px 24px; }
+  .card-header { display:flex;align-items:center;justify-content:space-between;margin-bottom:16px; }
+  .card-title { font-size:15px;font-weight:600;color:#1e293b; }
+  .btn { display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:7px;font-size:13.5px;font-weight:500;cursor:pointer;border:none;text-decoration:none;transition:opacity .15s; }
+  .btn:hover { opacity:.85; }
+  .btn-primary { background:#0a1929;color:#fff; }
+  .btn-outline { background:#fff;color:#374151;border:1.5px solid #d1d5db; }
+  .btn-sm { padding:5px 10px;font-size:12px; }
+  .table { width:100%;border-collapse:collapse;font-size:13.5px; }
+  .table th { padding:8px 10px;text-align:left;font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:#64748b;border-bottom:2px solid #f1f5f9; }
+  .table td { padding:10px;border-bottom:1px solid #f8fafc;color:#374151;vertical-align:middle; }
+  .badge { display:inline-flex;align-items:center;padding:3px 9px;border-radius:12px;font-size:11px;font-weight:600; }
+  .badge-green { background:#dcfce7;color:#166534; }
+  .badge-yellow { background:#fef9c3;color:#854d0e; }
+  .badge-red { background:#fee2e2;color:#991b1b; }
+  .badge-blue { background:#dbeafe;color:#1d4ed8; }
+  .badge-gray { background:#f1f5f9;color:#475569; }
+  .badge-gold { background:#fef3c7;color:#92400e; }
+  .alert { padding:12px 16px;border-radius:8px;font-size:13.5px;margin-bottom:8px; }
+  .alert-info { background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8; }
+  .alert-warning { background:#fffbeb;border:1px solid #fde68a;color:#92400e; }
+  .modal-overlay { display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;align-items:center;justify-content:center;padding:20px; }
+  .modal-overlay.open { display:flex; }
+  .modal { background:#fff;border-radius:12px;width:100%;max-width:520px; }
+  .modal-header { display:flex;align-items:center;justify-content:space-between;padding:18px 24px;border-bottom:1px solid #f1f5f9; }
+  .modal-title { font-size:16px;font-weight:600;color:#1e293b; }
+  .modal-close { background:none;border:none;font-size:20px;cursor:pointer;color:#64748b; }
+  .modal-body { padding:20px 24px; }
+  .modal-footer { padding:16px 24px;border-top:1px solid #f1f5f9;display:flex;justify-content:flex-end;gap:8px; }
+  .form-group { margin-bottom:14px; }
+  .form-label { display:block;font-size:13px;font-weight:500;color:#374151;margin-bottom:5px; }
+  .form-input, .form-select, .form-textarea { width:100%;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:7px;font-size:14px;outline:none; }
+</style>

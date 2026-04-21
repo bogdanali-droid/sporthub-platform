@@ -1,0 +1,94 @@
+---
+import FederatieLayout from '@/layouts/FederatieLayout.astro';
+if (!Astro.locals.user) return Astro.redirect('/login/federatie');
+
+const user = Astro.locals.user;
+const db = (Astro.locals as any).runtime?.env?.DB;
+
+import { queryAll } from '@/lib/db';
+
+const filterStatus = Astro.url.searchParams.get('status') ?? '';
+const filterType   = Astro.url.searchParams.get('type') ?? '';
+
+let where = 'WHERE 1=1';
+const params: any[] = [];
+if (filterStatus) { where += ' AND fr.status = ?'; params.push(filterStatus); }
+if (filterType)   { where += ' AND fr.request_type = ?'; params.push(filterType); }
+
+const cereri = await queryAll<any>(db,
+  `SELECT fr.*, c.name AS club_name, p.first_name || ' ' || p.last_name AS player_name
+   FROM federation_requests fr
+   JOIN clubs c ON c.id = fr.club_id
+   LEFT JOIN players p ON p.id = fr.player_id
+   ${where}
+   ORDER BY
+     CASE fr.status WHEN 'PENDING' THEN 1 WHEN 'INFO_NEEDED' THEN 2 WHEN 'IN_REVIEW' THEN 3 ELSE 4 END,
+     fr.created_at DESC LIMIT 100`, params);
+
+const statusBadge: Record<string,string> = {
+  PENDING:'badge-yellow', IN_REVIEW:'badge-blue', APPROVED:'badge-green',
+  REJECTED:'badge-red', INFO_NEEDED:'badge-gold'
+};
+const statusLabel: Record<string,string> = {
+  PENDING:'Nou', IN_REVIEW:'În analiză', APPROVED:'Aprobat', REJECTED:'Respins', INFO_NEEDED:'Info necesară'
+};
+---
+
+<FederatieLayout title="Cereri Cluburi" user={user} section="CCLTC">
+
+  <div style="margin-bottom:20px">
+    <h1 style="font-size:20px;font-weight:700;color:#1e293b">Cereri Cluburi</h1>
+    <p style="font-size:13px;color:#64748b">Toate solicitările primite de la cluburi afiliate</p>
+  </div>
+
+  <form method="GET" style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+    <select name="status" class="form-select" style="width:180px" onchange="this.form.submit()">
+      <option value="">Toate statusurile</option>
+      <option value="PENDING" selected={filterStatus==='PENDING'}>Noi</option>
+      <option value="IN_REVIEW" selected={filterStatus==='IN_REVIEW'}>În analiză</option>
+      <option value="INFO_NEEDED" selected={filterStatus==='INFO_NEEDED'}>Info necesară</option>
+      <option value="APPROVED" selected={filterStatus==='APPROVED'}>Aprobate</option>
+      <option value="REJECTED" selected={filterStatus==='REJECTED'}>Respinse</option>
+    </select>
+    <select name="type" class="form-select" style="width:200px" onchange="this.form.submit()">
+      <option value="">Toate tipurile</option>
+      <option value="LEGITIMARE">Legitimare</option>
+      <option value="TRANSFER">Transfer</option>
+      <option value="DEZLEGARE">Dezlegare</option>
+      <option value="DUBLA_LEGITIMARE">Dublă legitimare</option>
+      <option value="CONTESTATIE">Contestație</option>
+      <option value="MODIFICARE_DATE">Modificare date</option>
+      <option value="ALTELE">Altele</option>
+    </select>
+  </form>
+
+  <div class="card">
+    <table class="table">
+      <thead>
+        <tr><th>Club</th><th>Tip</th><th>Subiect</th><th>Jucător</th><th>Prioritate</th><th>Status</th><th>Data</th><th></th></tr>
+      </thead>
+      <tbody>
+        {cereri.length === 0 && (
+          <tr><td colspan="8" style="text-align:center;color:#64748b;padding:24px">Nu există cereri cu acești filteri.</td></tr>
+        )}
+        {cereri.map((c: any) => (
+          <tr>
+            <td style="font-weight:500">{c.club_name}</td>
+            <td><span class="badge badge-gray">{c.request_type}</span></td>
+            <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{c.subject}</td>
+            <td>{c.player_name ?? '—'}</td>
+            <td>
+              <span class={`badge ${c.priority === 'URGENT' ? 'badge-red' : c.priority === 'HIGH' ? 'badge-yellow' : 'badge-gray'}`}>
+                {c.priority}
+              </span>
+            </td>
+            <td><span class={`badge ${statusBadge[c.status] ?? 'badge-gray'}`}>{statusLabel[c.status] ?? c.status}</span></td>
+            <td style="color:#64748b;font-size:12px">{c.created_at?.slice(0,10)}</td>
+            <td><a href={`/federatie-admin/cereri/${c.id}`} class="btn btn-outline btn-sm">Deschide</a></td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+
+</FederatieLayout>
