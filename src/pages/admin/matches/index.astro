@@ -60,6 +60,7 @@ const periodsLabel = sport?.periodsLabel ?? 'Perioadă';
             <td>
               <button class="btn-icon" onclick={`editMatch('${m.id}')`}>✏️</button>
               <a class="btn-icon" href={`/admin/matches/${m.id}/squad`} title="Lot">👥</a>
+              <a class="btn-icon" href={`/admin/matches/${m.id}/live`} title="Live Scoring">🔴</a>
               <button class="btn-icon" onclick={`deleteMatch('${m.id}')`}>🗑️</button>
             </td>
           </tr>
