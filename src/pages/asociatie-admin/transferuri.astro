@@ -1,0 +1,89 @@
+---
+import AsociatieLayout from '@/layouts/AsociatieLayout.astro';
+if (!Astro.locals.user) return Astro.redirect('/login');
+const user = Astro.locals.user;
+if (!['ASSOCIATION_ADMIN','FEDERATION_ADMIN','SUPERADMIN'].includes(user.role)) return Astro.redirect('/login');
+const db = (Astro.locals as any).runtime?.env?.DB;
+
+import { queryAll, queryFirst } from '@/lib/db';
+
+const assoc = await queryFirst<any>(db, 'SELECT * FROM associations WHERE id=?', [user.association_id]);
+const filterStatus = Astro.url.searchParams.get('status') ?? '';
+
+let where = 'WHERE (tc.association_id=? OR fc.association_id=?)';
+const params: any[] = [user.association_id, user.association_id];
+if (filterStatus) { where += ' AND pt.status=?'; params.push(filterStatus); }
+
+const transferuri = await queryAll<any>(db,
+  `SELECT pt.*, p.first_name || ' ' || p.last_name AS player_name,
+          fc.name AS from_club_name, tc.name AS to_club_name
+   FROM player_transfers pt
+   JOIN players p ON p.id=pt.player_id
+   LEFT JOIN clubs fc ON fc.id=pt.from_club_id
+   JOIN clubs tc ON tc.id=pt.to_club_id
+   ${where}
+   ORDER BY pt.created_at DESC LIMIT 100`,
+  params);
+
+const statusBadge: Record<string,string> = {
+  PENDING:'badge-yellow', APPROVED:'badge-green', REJECTED:'badge-red', CANCELLED:'badge-gray'
+};
+const statusLabel: Record<string,string> = {
+  PENDING:'Pending', APPROVED:'Aprobat', REJECTED:'Respins', CANCELLED:'Anulat'
+};
+---
+
+<AsociatieLayout title="Transferuri" user={{ ...user, association_name: assoc?.name }}>
+
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+    <div>
+      <h1 style="font-size:20px;font-weight:700;color:#1e293b">Transferuri</h1>
+      <p style="font-size:13px;color:#64748b">Transferuri care implică cluburile asociației</p>
+    </div>
+    <span class="badge badge-gray" style="font-size:13px;padding:6px 12px">{transferuri.length} transferuri</span>
+  </div>
+
+  <div class="alert alert-warning" style="margin-bottom:16px">
+    Transferurile sunt aprobate de CCLTC. Această secțiune oferă vizualizare read-only.
+  </div>
+
+  <form method="GET" style="display:flex;gap:10px;margin-bottom:16px">
+    <select name="status" class="form-select" style="width:180px" onchange="this.form.submit()">
+      <option value="">Toate statusurile</option>
+      <option value="PENDING" selected={filterStatus==='PENDING'}>Pending</option>
+      <option value="APPROVED" selected={filterStatus==='APPROVED'}>Aprobate</option>
+      <option value="REJECTED" selected={filterStatus==='REJECTED'}>Respinse</option>
+    </select>
+  </form>
+
+  <div class="card">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Jucător</th><th>De la</th><th>La</th><th>Sport</th><th>Fereastră</th><th>Status</th><th>Data</th>
+        </tr>
+      </thead>
+      <tbody>
+        {transferuri.length === 0 && (
+          <tr><td colspan="7" style="text-align:center;color:#64748b;padding:24px">Nu există transferuri cu acești filteri.</td></tr>
+        )}
+        {transferuri.map((t: any) => (
+          <tr>
+            <td style="font-weight:500">{t.player_name}</td>
+            <td style="font-size:13px">{t.from_club_name ?? <em style="color:#94a3b8">—</em>}</td>
+            <td style="font-size:13px">{t.to_club_name}</td>
+            <td><span class="badge badge-blue">{t.sport_code}</span></td>
+            <td><span class="badge badge-gray">{t.transfer_window ?? '—'}</span></td>
+            <td>
+              <span class={`badge ${statusBadge[t.status] ?? 'badge-gray'}`}>
+                {statusLabel[t.status] ?? t.status}
+              </span>
+            </td>
+            <td style="font-size:12px;color:#64748b">{t.created_at?.slice(0,10) ?? '—'}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+
+</AsociatieLayout>

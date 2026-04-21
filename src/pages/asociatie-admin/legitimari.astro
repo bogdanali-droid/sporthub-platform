@@ -1,0 +1,95 @@
+---
+import AsociatieLayout from '@/layouts/AsociatieLayout.astro';
+if (!Astro.locals.user) return Astro.redirect('/login');
+const user = Astro.locals.user;
+if (!['ASSOCIATION_ADMIN','FEDERATION_ADMIN','SUPERADMIN'].includes(user.role)) return Astro.redirect('/login');
+const db = (Astro.locals as any).runtime?.env?.DB;
+
+import { queryAll, queryFirst } from '@/lib/db';
+
+const assoc = await queryFirst<any>(db, 'SELECT * FROM associations WHERE id=?', [user.association_id]);
+const filterStatus = Astro.url.searchParams.get('status') ?? '';
+const filterSport  = Astro.url.searchParams.get('sport') ?? '';
+
+let where = 'WHERE c.association_id=?';
+const params: any[] = [user.association_id];
+if (filterStatus) { where += ' AND pl.status=?'; params.push(filterStatus); }
+if (filterSport)  { where += ' AND pl.sport_code=?'; params.push(filterSport); }
+
+const legitimari = await queryAll<any>(db,
+  `SELECT pl.*, p.first_name || ' ' || p.last_name AS player_name, c.name AS club_name
+   FROM player_legitimations pl
+   JOIN players p ON p.id=pl.player_id
+   JOIN clubs c ON c.id=pl.club_id
+   ${where}
+   ORDER BY pl.created_at DESC LIMIT 100`,
+  params);
+
+const statusBadge: Record<string,string> = {
+  ACTIVE:'badge-green', PENDING:'badge-yellow', SUSPENDED:'badge-red', EXPIRED:'badge-gray', CANCELLED:'badge-gray'
+};
+const statusLabel: Record<string,string> = {
+  ACTIVE:'Activ', PENDING:'Pending', SUSPENDED:'Suspendat', EXPIRED:'Expirat', CANCELLED:'Anulat'
+};
+---
+
+<AsociatieLayout title="Legitimări" user={{ ...user, association_name: assoc?.name }}>
+
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+    <div>
+      <h1 style="font-size:20px;font-weight:700;color:#1e293b">Legitimări</h1>
+      <p style="font-size:13px;color:#64748b">Legitimările jucătorilor din cluburile asociației</p>
+    </div>
+    <span class="badge badge-gray" style="font-size:13px;padding:6px 12px">{legitimari.length} înregistrări</span>
+  </div>
+
+  <div class="alert alert-warning" style="margin-bottom:16px">
+    Legitimările sunt gestionate de CCLTC. Această secțiune oferă vizualizare read-only.
+  </div>
+
+  <form method="GET" style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+    <select name="status" class="form-select" style="width:180px" onchange="this.form.submit()">
+      <option value="">Toate statusurile</option>
+      <option value="ACTIVE" selected={filterStatus==='ACTIVE'}>Active</option>
+      <option value="PENDING" selected={filterStatus==='PENDING'}>Pending</option>
+      <option value="SUSPENDED" selected={filterStatus==='SUSPENDED'}>Suspendate</option>
+      <option value="EXPIRED" selected={filterStatus==='EXPIRED'}>Expirate</option>
+      <option value="CANCELLED" selected={filterStatus==='CANCELLED'}>Anulate</option>
+    </select>
+    <select name="sport" class="form-select" style="width:160px" onchange="this.form.submit()">
+      <option value="">Toate sporturile</option>
+      <option value="BASEBALL5" selected={filterSport==='BASEBALL5'}>Baseball5</option>
+      <option value="SOFTBALL" selected={filterSport==='SOFTBALL'}>Softball</option>
+    </select>
+  </form>
+
+  <div class="card">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Jucător</th><th>Club</th><th>Sport</th><th>Licență</th><th>Status</th><th>Data</th>
+        </tr>
+      </thead>
+      <tbody>
+        {legitimari.length === 0 && (
+          <tr><td colspan="6" style="text-align:center;color:#64748b;padding:24px">Nu există legitimări cu acești filteri.</td></tr>
+        )}
+        {legitimari.map((l: any) => (
+          <tr>
+            <td style="font-weight:500">{l.player_name}</td>
+            <td>{l.club_name}</td>
+            <td><span class="badge badge-blue">{l.sport_code}</span></td>
+            <td style="font-family:monospace;font-size:12px">{l.license_number ?? <em style="color:#94a3b8">—</em>}</td>
+            <td>
+              <span class={`badge ${statusBadge[l.status] ?? 'badge-gray'}`}>
+                {statusLabel[l.status] ?? l.status}
+              </span>
+            </td>
+            <td style="font-size:12px;color:#64748b">{l.created_at?.slice(0,10) ?? '—'}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+
+</AsociatieLayout>
