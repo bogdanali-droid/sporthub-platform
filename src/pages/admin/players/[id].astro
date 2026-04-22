@@ -243,6 +243,15 @@ const tab = Astro.url.searchParams.get('tab') ?? 'profil';
             <button type="button" class="btn btn-primary" onclick="saveEvaluation()" style="width:100%">Salvează Evaluare</button>
           </div>
 
+          <h3 style="font-size:14px;font-weight:600;margin-top:24px;margin-bottom:16px">Profil Competențe (Medie)</h3>
+          {evaluations.length === 0 ? (
+            <p style="color:#94a3b8;font-size:13px">Nicio evaluare înregistrată.</p>
+          ) : (
+            <div style="background:#fff;border-radius:12px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,.1);max-width:500px;margin:0 auto 24px">
+              <canvas id="radar-chart"></canvas>
+            </div>
+          )}
+
           <h3 style="font-size:14px;font-weight:600;margin-top:24px;margin-bottom:16px">Evaluări Anterioare</h3>
           {evaluations.length === 0 ? (
             <p style="color:#94a3b8;font-size:13px">Nicio evaluare înregistrată.</p>
@@ -462,8 +471,10 @@ const tab = Astro.url.searchParams.get('tab') ?? 'profil';
     .badge-cancelled { background: #fee2e2; color: #991b1b; }
   </style>
 
-  <script define:vars={{ playerId: id, clubId }}>
+  <script define:vars={{ playerId: id, clubId, evalData: JSON.stringify(evaluations), attrsData: JSON.stringify(evalAttrs) }}>
     const evalScores = {};
+    const EVAL_DATA = JSON.parse(evalData);
+    const ATTRS_DATA = JSON.parse(attrsData);
 
     function setStar(attr, val, btn) {
       evalScores[attr] = val;
@@ -587,5 +598,76 @@ const tab = Astro.url.searchParams.get('tab') ?? 'profil';
         setTimeout(() => window.location.reload(), 1500);
       }
     });
+
+    // Radar chart initialization for evaluations
+    (async () => {
+      const chartEl = document.getElementById('radar-chart') as HTMLCanvasElement;
+      if (!chartEl) return;
+
+      try {
+        // Load Chart.js from CDN
+        if (!window.Chart) {
+          const script = document.createElement('script');
+          script.src = 'https://cdn.jsdelivr.net/npm/chart.js';
+          script.onload = () => initRadarChart();
+          document.head.appendChild(script);
+        } else {
+          initRadarChart();
+        }
+      } catch (e) {
+        console.error('Failed to load Chart.js:', e);
+      }
+
+      function initRadarChart() {
+        if (EVAL_DATA.length === 0 || ATTRS_DATA.length === 0) return;
+
+        // Calculate average scores per attribute
+        const attrMap = new Map();
+        ATTRS_DATA.forEach((attr: any) => attrMap.set(attr.code, { name: attr.name_ro, scores: [] }));
+
+        EVAL_DATA.forEach((ev: any) => {
+          const scores = ev.scores || {};
+          Object.entries(scores).forEach(([code, score]: [string, any]) => {
+            const attr = attrMap.get(code);
+            if (attr) attr.scores.push(parseFloat(score));
+          });
+        });
+
+        const labels = Array.from(attrMap.values()).map((a: any) => a.name);
+        const data = Array.from(attrMap.values()).map((a: any) => {
+          const avg = a.scores.length > 0 ? a.scores.reduce((s: number, v: number) => s + v, 0) / a.scores.length : 0;
+          return parseFloat(avg.toFixed(2));
+        });
+
+        new Chart(chartEl, {
+          type: 'radar',
+          data: {
+            labels,
+            datasets: [
+              {
+                label: 'Medie Evaluări',
+                data,
+                borderColor: 'rgb(59, 130, 246)',
+                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                pointBackgroundColor: 'rgb(59, 130, 246)',
+                pointBorderColor: '#fff',
+                pointHoverBackgroundColor: '#fff',
+                pointHoverBorderColor: 'rgb(59, 130, 246)',
+                pointRadius: 4,
+                pointHoverRadius: 6,
+                borderWidth: 2,
+                tension: 0.4
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            plugins: { legend: { display: true, position: 'bottom' as const } },
+            scales: { r: { beginAtZero: true, max: 5, ticks: { stepSize: 1 } } }
+          }
+        });
+      }
+    })();
   </script>
 </AdminLayout>
