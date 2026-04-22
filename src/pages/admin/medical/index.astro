@@ -7,16 +7,18 @@ if (!user) return Astro.redirect('/login');
 
 const db = (Astro.locals as any).runtime?.env?.DB;
 const clubId = user.club_id;
+import { queryAll } from '@/lib/db';
 
 let visits: any[] = [];
 try {
-  const res = await db?.prepare(`
-    SELECT mv.*, p.first_name, p.last_name
-    FROM medical_visits mv JOIN players p ON p.id=mv.player_id
-    WHERE mv.club_id=? ORDER BY mv.visit_date DESC LIMIT 100
-  `).bind(clubId).all();
-  visits = res?.results ?? [];
-} catch {}
+  visits = await queryAll<any>(db,
+    `SELECT mv.*, p.first_name, p.last_name
+     FROM medical_visits mv JOIN players p ON p.id=mv.player_id
+     WHERE mv.club_id=? ORDER BY mv.visit_date DESC LIMIT 100`,
+    [clubId]);
+} catch (e) {
+  console.error('Medical visits load error:', e);
+}
 
 const today = new Date().toISOString().slice(0,10);
 const expired = visits.filter((v: any) => v.valid_until && v.valid_until < today).length;

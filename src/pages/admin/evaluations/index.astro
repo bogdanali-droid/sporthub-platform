@@ -7,7 +7,7 @@ const user = Astro.locals.user;
 if (!user) return Astro.redirect('/login');
 
 const db = (Astro.locals as any).runtime?.env?.DB;
-const clubId = (Astro.locals as any).clubId;
+const clubId = (Astro.locals as any).clubId ?? user.club_id;
 
 const evaluations = await queryAll<any>(db, `
   SELECT pes.*, p.first_name, p.last_name, p.jersey_number,

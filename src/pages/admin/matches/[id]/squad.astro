@@ -240,7 +240,7 @@ const starterFemales = starters.filter(s => genderMap.get(s.player_id) === 'F').
     COACH:   'background:#d1fae5;color:#065f46',
   };
 
-  function openModal(playerId, playerName, role, position) {
+  window.openModal = function(playerId, playerName, role, position) {
     currentPlayerId = playerId;
     currentPlayerName = playerName;
     (document.getElementById('m-player-id') as HTMLInputElement).value = playerId;
@@ -248,24 +248,24 @@ const starterFemales = starters.filter(s => genderMap.get(s.player_id) === 'F').
     (document.getElementById('m-role') as HTMLSelectElement).value = role || 'STARTER';
     (document.getElementById('m-position') as HTMLSelectElement).value = position || '';
     (document.getElementById('modal') as HTMLElement).classList.remove('hidden');
-  }
+  };
 
-  function closeModal() {
+  window.closeModal = function() {
     (document.getElementById('modal') as HTMLElement).classList.add('hidden');
-  }
+  };
 
-  function addPlayer(id, name, position) {
+  window.addPlayer = function(id, name, position) {
     (document.getElementById('modal-title') as HTMLElement).textContent = 'Adaugă la lot';
-    openModal(id, name, 'STARTER', position);
-  }
+    window.openModal(id, name, 'STARTER', position);
+  };
 
-  function editSelection(playerId, role, position) {
+  window.editSelection = function(playerId, role, position) {
     (document.getElementById('modal-title') as HTMLElement).textContent = 'Editează selecție';
     const nameEl = document.querySelector(`#row-${playerId} td.fw600`);
-    openModal(playerId, nameEl?.textContent ?? '', role, position);
-  }
+    window.openModal(playerId, nameEl?.textContent ?? '', role, position);
+  };
 
-  async function saveSelection() {
+  window.saveSelection = async function() {
     const playerId  = (document.getElementById('m-player-id') as HTMLInputElement).value;
     const role      = (document.getElementById('m-role') as HTMLSelectElement).value;
     const position  = (document.getElementById('m-position') as HTMLSelectElement).value || null;
@@ -275,15 +275,15 @@ const starterFemales = starters.filter(s => genderMap.get(s.player_id) === 'F').
       body: JSON.stringify({ player_id: playerId, role, position_played: position }),
     });
     if (r.ok) {
-      closeModal();
+      window.closeModal();
       window.location.reload();
     } else {
       const err = await r.json();
       alert(err.error ?? 'Eroare');
     }
-  }
+  };
 
-  async function removePlayer(playerId) {
+  window.removePlayer = async function(playerId) {
     if (!confirm('Elimini jucătorul din lot?')) return;
     const r = await fetch(`/api/admin/matches/${MATCH_ID}/squad`, {
       method: 'DELETE',
@@ -296,5 +296,5 @@ const starterFemales = starters.filter(s => genderMap.get(s.player_id) === 'F').
       const err = await r.json();
       alert(err.error ?? 'Eroare');
     }
-  }
+  };
 </script>
