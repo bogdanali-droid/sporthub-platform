@@ -54,7 +54,7 @@ const currentPath = Astro.url.pathname;
 
     /* SIDEBAR */
     #sidebar {
-      width: 248px; height: 100vh; background: var(--fed-bg);
+      width: 260px; height: 100vh; background: var(--fed-bg);
       display: flex; flex-direction: column; position: fixed; top: 0; left: 0; z-index: 100;
       transition: transform .25s ease;
     }
@@ -96,7 +96,7 @@ const currentPath = Astro.url.pathname;
     .sidebar-footer a:hover { color: #cbd5e1; }
 
     /* MAIN */
-    #main { margin-left: 248px; flex: 1; display: flex; flex-direction: column; min-height: 100vh; }
+    #main { margin-left: 260px; flex: 1; display: flex; flex-direction: column; min-height: 100vh; }
 
     /* TOPBAR */
     #topbar {
@@ -130,9 +130,13 @@ const currentPath = Astro.url.pathname;
     .btn:active { transform: translateY(0); }
     .btn-primary { background: var(--fed-bg); color: #fff; }
     .btn-primary:hover { background: #001a2e; }
+    .btn-secondary { background: #f1f5f9; color: var(--fed-bg); border: 2px solid #d1d5db; }
+    .btn-secondary:hover { background: #e2e8f0; }
     .btn-gold { background: var(--fed-accent); color: var(--fed-bg); font-weight: 600; }
     .btn-gold:hover { background: #e6a300; }
-    .btn-danger { background: #ef4444; color: #fff; }
+    .btn-success { background: #00C48C; color: #fff; }
+    .btn-success:hover { background: #059669; }
+    .btn-danger { background: #E63946; color: #fff; }
     .btn-danger:hover { background: #dc2626; }
     .btn-outline { background: #fff; color: #374151; border: 2px solid #d1d5db; }
     .btn-outline:hover { background: #f1f5f9; }
@@ -152,7 +156,11 @@ const currentPath = Astro.url.pathname;
     .table td { padding: 14px 16px; border-bottom: 1px solid #e2e8f0; color: #374151; }
     .table tr:hover td { background: #f8fafc; }
 
-    .badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+    /* Federation-specific accent styles for badges and buttons */
+    .badge-fed { background: #fef3c7; color: #92400e; }
+    .btn-fed-primary { background: var(--fed-accent); color: var(--fed-bg); }
+
+    .badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 8px; font-size: 12px; font-weight: 700; }
     .badge-green { background: #dcfce7; color: #166534; }
     .badge-yellow { background: #fef9c3; color: #854d0e; }
     .badge-red { background: #fee2e2; color: #991b1b; }
