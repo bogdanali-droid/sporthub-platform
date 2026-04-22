@@ -184,9 +184,9 @@ const periodsLabel = sport?.periodsLabel ?? 'Perioadă';
     });
   }
   let editingId: string | null = null;
-  function openModal() { editingId=null; (document.getElementById('modal-title') as HTMLElement).textContent='Meci nou'; (document.getElementById('match-form') as HTMLFormElement).reset(); (document.getElementById('modal') as HTMLElement).classList.remove('hidden'); }
-  function closeModal() { (document.getElementById('modal') as HTMLElement).classList.add('hidden'); }
-  async function editMatch(id: string) {
+  window.openModal = function() { editingId=null; (document.getElementById('modal-title') as HTMLElement).textContent='Meci nou'; (document.getElementById('match-form') as HTMLFormElement).reset(); (document.getElementById('modal') as HTMLElement).classList.remove('hidden'); }
+  window.closeModal = function() { (document.getElementById('modal') as HTMLElement).classList.add('hidden'); }
+  window.editMatch = async function(id: string) {
     const r = await fetch(`/api/admin/matches/${id}`); if(!r.ok) return;
     const m = await r.json(); editingId = id;
     (document.getElementById('modal-title') as HTMLElement).textContent='Editează meci';
@@ -201,7 +201,7 @@ const periodsLabel = sport?.periodsLabel ?? 'Perioadă';
     (document.getElementById('f-status') as HTMLSelectElement).value = m.status??'SCHEDULED';
     (document.getElementById('modal') as HTMLElement).classList.remove('hidden');
   }
-  async function deleteMatch(id: string) {
+  window.deleteMatch = async function(id: string) {
     if(!confirm('Anulezi meciul?')) return;
     const r = await fetch(`/api/admin/matches/${id}`, {method:'DELETE'});
     if(r.ok) location.reload();

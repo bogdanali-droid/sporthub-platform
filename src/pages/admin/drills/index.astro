@@ -178,14 +178,14 @@ const difficultyColor: Record<string,string> = { BEGINNER:'#d1fae5;color:#065f46
 
   let editingId: string | null = null;
 
-  function openModal() {
+  window.openModal = function() {
     editingId = null;
     (document.getElementById('modal-title') as HTMLElement).textContent = 'Drill nou';
     (document.getElementById('drill-form')  as HTMLFormElement).reset();
     (document.getElementById('modal')       as HTMLElement).classList.remove('hidden');
   }
 
-  function closeModal() {
+  window.closeModal = function() {
     (document.getElementById('modal') as HTMLElement).classList.add('hidden');
   }
 
@@ -200,7 +200,7 @@ const difficultyColor: Record<string,string> = { BEGINNER:'#d1fae5;color:#065f46
     (document.getElementById('modal')         as HTMLElement).classList.remove('hidden');
   }
 
-  async function deleteDrill(id: string) {
+  window.deleteDrill = async function(id: string) {
     if (!confirm('Ștergi acest drill?')) return;
     const r = await fetch(`/api/admin/drills/${id}`, { method: 'DELETE' });
     if (r.ok) location.reload(); else { const e = await r.json(); alert(e.error ?? 'Eroare'); }
