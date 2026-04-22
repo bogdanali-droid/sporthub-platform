@@ -204,19 +204,19 @@ const [sport, players, teams] = await Promise.all([
 
   let editingId: string | null = null;
 
-  function openModal() {
+  window.openModal = function() {
     editingId = null;
     (document.getElementById('modal-title') as HTMLElement).textContent = 'Jucător nou';
     (document.getElementById('player-form') as HTMLFormElement).reset();
     (document.getElementById('modal') as HTMLElement).classList.remove('hidden');
-  }
+  };
 
-  function closeModal() {
+  window.closeModal = function() {
     (document.getElementById('modal') as HTMLElement).classList.add('hidden');
     editingId = null;
-  }
+  };
 
-  async function editPlayer(id: string) {
+  window.editPlayer = async function(id: string) {
     const res = await fetch(`/api/admin/players/${id}`);
     if (!res.ok) return;
     const p = await res.json();
@@ -234,12 +234,12 @@ const [sport, players, teams] = await Promise.all([
     (document.getElementById('modal') as HTMLElement).classList.remove('hidden');
   }
 
-  async function deletePlayer(id: string, name: string) {
+  window.deletePlayer = async function(id: string, name: string) {
     if (!confirm(`Ștergi jucătorul ${name}?`)) return;
     const res = await fetch(`/api/admin/players/${id}`, { method: 'DELETE' });
     if (res.ok) location.reload();
     else alert('Eroare la ștergere.');
-  }
+  };
 
   document.getElementById('player-form')?.addEventListener('submit', async e => {
     e.preventDefault();
