@@ -38,9 +38,9 @@ const currentPath = Astro.url.pathname;
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{title} — SportHub</title>
-  <link rel="icon" type="image/svg+xml" href="/branding/sporthub-favicon-32.svg" />
+  <link rel="icon" type="image/svg+xml" href="/branding/sporthub-favicon.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     :root {
       --sidebar-bg: #0A2540;
@@ -50,15 +50,17 @@ const currentPath = Astro.url.pathname;
       --primary: #1976C2;
       --primary-dark: #114B7E;
       --secondary: #FF7849;
-      --success: #10b981;
-      --warning: #f59e0b;
-      --danger: #ef4444;
+      --success: #00C48C;
+      --warning: #FFB020;
+      --danger: #E63946;
       --topbar-bg: #ffffff;
       --content-bg: #f8fafc;
       --border-color: #e2e8f0;
       --text-primary: #1e293b;
       --text-secondary: #475569;
       --text-light: #64748b;
+      --font-brand: 'Outfit', system-ui, sans-serif;
+      --font-ui: 'Inter', system-ui, sans-serif;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -146,7 +148,7 @@ const currentPath = Astro.url.pathname;
     }
 
     .page-title {
-      font-size: 18px; font-weight: 700; color: var(--text-primary);
+      font-family: var(--font-brand); font-size: 18px; font-weight: 700; color: var(--text-primary);
       letter-spacing: -.5px;
     }
 
@@ -222,7 +224,7 @@ const currentPath = Astro.url.pathname;
       border-bottom: 1px solid var(--border-color);
     }
 
-    .card-title { font-size: 16px; font-weight: 700; color: var(--text-primary); }
+    .card-title { font-family: var(--font-brand); font-size: 16px; font-weight: 700; color: var(--text-primary); }
 
     /* FORMS */
     .form-group { margin-bottom: 24px; }
@@ -288,7 +290,7 @@ const currentPath = Astro.url.pathname;
       border: 1px solid var(--border-color);
     }
 
-    .stat-value { font-size: 32px; font-weight: 800; color: var(--primary); margin-bottom: 8px; }
+    .stat-value { font-family: var(--font-brand); font-size: 32px; font-weight: 800; color: var(--primary); margin-bottom: 8px; }
     .stat-label { font-size: 12px; color: var(--text-light); text-transform: uppercase; letter-spacing: .05em; }
 
     /* Mobile */
@@ -321,7 +323,7 @@ const currentPath = Astro.url.pathname;
 <aside id="sidebar">
   <div class="sidebar-logo">
     <div>
-      <img src="/branding/sporthub-logo-dark-bg.svg" alt="SportHub" />
+      <img src="/branding/sporthub-logo-white.svg" alt="SportHub" />
       <div class="sport-label">{sportCode ?? 'Admin'}</div>
     </div>
   </div>

@@ -17,8 +17,8 @@ if (user) {
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SportHub România — Platforma multi-sport</title>
-  <link rel="icon" type="image/svg+xml" href="/branding/sporthub-favicon-32.svg" />
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700;800;900&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="icon" type="image/svg+xml" href="/branding/sporthub-favicon.svg" />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -52,9 +52,15 @@ if (user) {
       letter-spacing: .08em; text-transform: uppercase; margin-bottom: 28px;
     }
     .hero h1 {
-      font-family: 'Space Grotesk', sans-serif;
-      font-size: 56px; font-weight: 900; color: #fff;
+      font-family: 'Outfit', sans-serif;
+      font-size: 56px; font-weight: 800; color: #fff;
       line-height: 1.15; margin-bottom: 24px; letter-spacing: -1px;
+    }
+    .hero h1 .gradient-text {
+      background: linear-gradient(90deg, #1976C2 0%, #00D9FF 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
     }
     .hero h1 span { color: #FF7849; }
     .hero p { font-size: 19px; color: #cbd5e1; max-width: 620px; margin: 0 auto 48px; line-height: 1.7; }
@@ -139,14 +145,14 @@ if (user) {
 <body>
   <header class="header">
     <div class="header-brand">
-      <img src="/branding/sporthub-logo-dark-bg.svg" alt="SportHub" style="height:36px" />
+      <img src="/branding/sporthub-logo-white.svg" alt="SportHub" style="height:36px" />
     </div>
     <a href="/login" class="btn-login">Autentificare</a>
   </header>
 
   <section class="hero">
     <div class="hero-tag">Platforma oficială FRBS</div>
-    <h1>Gestionează sportul<br /><span>de la A la Z</span></h1>
+    <h1>Gestionează sportul<br /><span class="gradient-text">de la A la Z</span></h1>
     <p>Legitimări, transferuri, competiții, antrenamente și statistici live pentru Baseball5 și Softball în România.</p>
     <div class="hero-cta">
       <a href="/login" class="btn-primary">⚡ Intră în platformă</a>

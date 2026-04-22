@@ -36,8 +36,8 @@ const currentPath = Astro.url.pathname;
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{title} — Portal FRBS</title>
-  <link rel="icon" type="image/svg+xml" href="/branding/sporthub-favicon-32.svg" />
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="icon" type="image/svg+xml" href="/branding/sporthub-favicon.svg" />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     :root {
       --fed-bg: #001524;
@@ -46,9 +46,11 @@ const currentPath = Astro.url.pathname;
       --fed-accent: #F4B400;
       --fed-border: #0a2540;
       --content-bg: #f1f5f9;
+      --font-brand: 'Outfit', system-ui, sans-serif;
+      --font-ui: 'Inter', system-ui, sans-serif;
     }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; display: flex; min-height: 100vh; background: var(--content-bg); }
+    body { font-family: var(--font-ui), -apple-system, BlinkMacSystemFont, sans-serif; display: flex; min-height: 100vh; background: var(--content-bg); }
 
     /* SIDEBAR */
     #sidebar {
@@ -103,7 +105,7 @@ const currentPath = Astro.url.pathname;
       border-bottom: 2px solid #e2e8f0; position: sticky; top: 0; z-index: 90;
       box-shadow: 0 2px 4px rgba(0,0,0,.05);
     }
-    .page-title { font-size: 18px; font-weight: 700; color: #1e293b; letter-spacing: -.5px; }
+    .page-title { font-family: var(--font-brand); font-size: 18px; font-weight: 700; color: #1e293b; letter-spacing: -.5px; }
     .topbar-right { display: flex; align-items: center; gap: 16px; }
     .user-badge { display: flex; align-items: center; gap: 10px; font-size: 13px; color: #475569; padding: 8px 12px; background: #f1f5f9; border-radius: 8px; }
     .user-avatar {
@@ -139,10 +141,10 @@ const currentPath = Astro.url.pathname;
 
     .card { background: #fff; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.08); padding: 28px; margin-bottom: 24px; border: 1px solid #e2e8f0; }
     .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid #e2e8f0; }
-    .card-title { font-size: 16px; font-weight: 700; color: #1e293b; }
+    .card-title { font-family: var(--font-brand); font-size: 16px; font-weight: 700; color: #1e293b; }
 
     .stat-card { background: #fff; border-radius: 12px; padding: 28px; box-shadow: 0 1px 3px rgba(0,0,0,.08); border: 1px solid #e2e8f0; }
-    .stat-value { font-size: 32px; font-weight: 800; color: var(--fed-accent); margin-bottom: 8px; }
+    .stat-value { font-family: var(--font-brand); font-size: 32px; font-weight: 800; color: var(--fed-accent); margin-bottom: 8px; }
     .stat-label { font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: .05em; }
 
     .table { width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; }
@@ -209,7 +211,7 @@ const currentPath = Astro.url.pathname;
 <aside id="sidebar">
   <div class="sidebar-logo">
     <div>
-      <img src="/branding/sporthub-logo-dark-bg.svg" alt="SportHub" style="height:32px;margin-bottom:4px" />
+      <img src="/branding/sporthub-logo-white.svg" alt="SportHub" style="height:32px;margin-bottom:4px" />
       <div class="brand-sub">{section}</div>
     </div>
   </div>
