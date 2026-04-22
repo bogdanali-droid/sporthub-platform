@@ -39,16 +39,18 @@ const roleColor: Record<string,string> = {
 
 const positions = sport?.positions ?? [];
 
-// Gender mix analytics
-const genderStats = await Promise.all(selections.map(s =>
-  db.prepare('SELECT gender FROM players WHERE id=?').bind(s.player_id).first()
-));
-const maleCount = genderStats.filter((g: any) => g?.gender === 'M').length;
-const femaleCount = genderStats.filter((g: any) => g?.gender === 'F').length;
+// Gender mix analytics - using queryAll instead of db.prepare()
+const genderResults = await queryAll<any>(db,
+  `SELECT p.id, p.gender FROM players p
+   WHERE p.id IN (${selections.map(() => '?').join(',')})`,
+  selections.map(s => s.player_id)
+);
+const genderMap = new Map(genderResults.map(g => [g.id, g.gender]));
+const maleCount = selections.filter(s => genderMap.get(s.player_id) === 'M').length;
+const femaleCount = selections.filter(s => genderMap.get(s.player_id) === 'F').length;
 const starters = selections.filter((s: any) => s.role === 'STARTER');
-const starterGenders = starters.map((s: any) => genderStats[selections.indexOf(s)]);
-const starterMales = starterGenders.filter((g: any) => g?.gender === 'M').length;
-const starterFemales = starterGenders.filter((g: any) => g?.gender === 'F').length;
+const starterMales = starters.filter(s => genderMap.get(s.player_id) === 'M').length;
+const starterFemales = starters.filter(s => genderMap.get(s.player_id) === 'F').length;
 ---
 
 <AdminLayout title={`Lot — vs ${match.opponent_name}`} user={user} sportCode={sport?.code} sportIcon={sport?.icon}>
