@@ -116,7 +116,7 @@ const SPORT_CODES = ['BASEBALL5', 'SOFTBALL', 'RUGBY', 'FOTBAL', 'HANDBAL', 'BAS
     </div>
   </div>
 
-  <script>
+  <script is:inline>
     async function saveUser(userId) {
       const container = document.getElementById('sports-' + userId);
       const checked = Array.from(container.querySelectorAll('input:checked')).map(cb => cb.value);

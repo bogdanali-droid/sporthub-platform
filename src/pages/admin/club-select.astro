@@ -85,7 +85,7 @@ const clubs = await queryAll<{ id: string; name: string; city: string | null; sp
 
   <a href="/federatie-admin" class="back-link">← Înapoi la portal federație</a>
 
-  <script>
+  <script is:inline>
     async function selectClub(clubId) {
       const res = await fetch('/api/auth/set-impersonated-club', {
         method: 'POST',
