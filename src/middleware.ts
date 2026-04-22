@@ -75,8 +75,11 @@ export const onRequest = defineMiddleware(async (context, next) => {
     return redirect('/login');
   }
 
-  locals.user = session.user;
-  locals.clubId = session.user.impersonated_club_id ?? session.user.club_id;
+  locals.user = {
+    ...session.user,
+    club_id: session.user.impersonated_club_id ?? session.user.club_id,
+  };
+  locals.clubId = locals.user.club_id;
 
   const { role } = session.user;
   const isApi = url.pathname.startsWith('/api/');
