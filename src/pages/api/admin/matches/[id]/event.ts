@@ -20,6 +20,17 @@ export const POST: APIRoute = async ({ locals, params, request }) => {
      body.player_id ?? null, body.player_name ?? null, body.points ?? 0,
      body.description ?? null, locals.user.id, body.inning ?? null, body.half ?? null]);
 
+  // Update score if points provided
+  if ((body.points ?? 0) > 0) {
+    const points = body.points;
+    const team = body.team ?? 'HOME';
+    if (team === 'HOME') {
+      await execute(db, `UPDATE matches SET score_home = score_home + ? WHERE id=?`, [points, id]);
+    } else {
+      await execute(db, `UPDATE matches SET score_away = score_away + ? WHERE id=?`, [points, id]);
+    }
+  }
+
   // Check mercy rule for Baseball5 (15+ runs after 3 innings, 10+ after 4)
   const events = await queryAll<any>(db,
     `SELECT * FROM match_events WHERE match_id=? ORDER BY created_at DESC LIMIT 50`, [id]);
