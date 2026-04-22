@@ -6,18 +6,19 @@ export const POST: APIRoute = async ({ locals, params, request }) => {
     return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403 });
 
   const db = (locals as any).runtime?.env?.DB;
+  const clubId = (locals as any).clubId ?? locals.user?.club_id;
   const id = params.id;
   const body = await request.json() as any;
 
-  const match = await queryFirst<any>(db, `SELECT id FROM matches WHERE id=? AND club_id=?`, [id, locals.user.club_id]);
+  const match = await queryFirst<any>(db, `SELECT id FROM matches WHERE id=? AND club_id=?`, [id, clubId]);
   if (!match) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404 });
 
   await execute(db,
-    `INSERT INTO match_events (match_id, club_id, period, event_type, team, player_id, player_name, points, description, created_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [id, locals.user.club_id, body.period ?? null, body.event_type, body.team ?? 'HOME',
+    `INSERT INTO match_events (match_id, club_id, period, event_type, team, player_id, player_name, points, description, created_by, inning, half)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, clubId, body.period ?? null, body.event_type, body.team ?? 'HOME',
      body.player_id ?? null, body.player_name ?? null, body.points ?? 0,
-     body.description ?? null, locals.user.id]);
+     body.description ?? null, locals.user.id, body.inning ?? null, body.half ?? null]);
 
   return new Response(JSON.stringify({ ok: true }), { status: 201 });
 };
