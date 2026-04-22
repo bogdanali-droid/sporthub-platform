@@ -7,6 +7,7 @@ const PUBLIC_PATHS = [
   '/api/onboarding/setup', '/check-in', '/api/check-in',
   '/prezenta', '/api/prezenta', '/sanatate', '/api/sanatate',
   '/disponibil', '/api/disponibil', '/meci', '/api/matches', '/api/ical',
+  '/api/health',
 ];
 
 function isPublicPath(pathname: string): boolean {
