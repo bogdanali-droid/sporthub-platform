@@ -6,78 +6,880 @@ const user = Astro.locals.user;
 if (!user) return Astro.redirect('/login');
 
 const db = (Astro.locals as any).runtime?.env?.DB;
-const clubId = user.club_id;
-const filter = Astro.url.searchParams.get('status') || '';
+const url = new URL(Astro.request.url);
+const statusFilter = url.searchParams.get('status') || '';
+const teamFilter = url.searchParams.get('team_id') || '';
+const playerSearch = url.searchParams.get('q') || '';
+const msg = url.searchParams.get('msg');
 
-let payments: any[] = [];
-try {
-  const q = filter
-    ? `SELECT p.*, pl.first_name, pl.last_name FROM payments p JOIN players pl ON pl.id=p.player_id WHERE p.club_id=? AND p.status=? ORDER BY p.created_at DESC LIMIT 100`
-    : `SELECT p.*, pl.first_name, pl.last_name FROM payments p JOIN players pl ON pl.id=p.player_id WHERE p.club_id=? ORDER BY p.created_at DESC LIMIT 100`;
-  const res = filter ? await db?.prepare(q).bind(clubId, filter).all() : await db?.prepare(q).bind(clubId).all();
-  payments = res?.results ?? [];
-} catch {}
+const teamsRes = await db?.prepare(
+  `SELECT id, name, age_group FROM teams WHERE club_id = ? ORDER BY age_group, name`
+).bind(user.club_id).all();
+const teams = teamsRes?.results ?? [];
 
-const total = payments.reduce((s: number, p: any) => s + (p.amount || 0), 0);
-const paid = payments.filter((p: any) => p.status === 'PAID').reduce((s: number, p: any) => s + (p.amount || 0), 0);
-const pending = payments.filter((p: any) => p.status === 'PENDING').length;
+const playersRes = await db?.prepare(
+  `SELECT p.id, p.first_name, p.last_name, t.name as team_name, t.age_group
+   FROM players p
+   LEFT JOIN team_players tp ON tp.player_id = p.id AND tp.left_at IS NULL
+   LEFT JOIN teams t ON t.id = tp.team_id
+   WHERE p.club_id = ? AND p.status = 'ACTIVE'
+   ORDER BY p.last_name, p.first_name`
+).bind(user.club_id).all();
+const allPlayers = playersRes?.results ?? [];
+
+let query = `
+  SELECT pay.*, p.first_name, p.last_name, t.name as team_name, t.age_group
+  FROM payments pay
+  JOIN players p ON p.id = pay.player_id
+  LEFT JOIN team_players tp ON tp.player_id = p.id AND tp.left_at IS NULL
+  LEFT JOIN teams t ON t.id = tp.team_id
+  WHERE pay.club_id = ?
+`;
+const params: any[] = [user.club_id];
+
+if (statusFilter) {
+  query += ' AND pay.status = ?';
+  params.push(statusFilter);
+}
+if (teamFilter) {
+  query += ' AND t.id = ?';
+  params.push(teamFilter);
+}
+if (playerSearch) {
+  query += ` AND (p.first_name LIKE ? OR p.last_name LIKE ?)`;
+  params.push(`%${playerSearch}%`, `%${playerSearch}%`);
+}
+
+query += ` ORDER BY
+  CASE pay.status WHEN 'OVERDUE' THEN 1 WHEN 'PENDING' THEN 2 WHEN 'PAID' THEN 3 ELSE 4 END,
+  pay.due_date ASC`;
+
+const paymentsRes = await db?.prepare(query).bind(...params).all();
+const payments = paymentsRes?.results ?? [];
+
+// Stats: use unfiltered totals
+const statsRes = await db?.prepare(`
+  SELECT
+    SUM(CASE WHEN status='PENDING' THEN amount ELSE 0 END) as pending_total,
+    SUM(CASE WHEN status='OVERDUE' THEN amount ELSE 0 END) as overdue_total,
+    SUM(CASE WHEN status='PAID' AND strftime('%Y-%m', paid_at) = strftime('%Y-%m', 'now') THEN amount ELSE 0 END) as paid_this_month
+  FROM payments WHERE club_id = ?
+`).bind(user.club_id).first();
+const stats = statsRes ?? { pending_total: 0, overdue_total: 0, paid_this_month: 0 };
+
+const teamStatsRes = await db?.prepare(`
+  SELECT t.name as team_name, t.age_group,
+    COUNT(pay.id) as total_count,
+    SUM(pay.amount) as total_amount,
+    SUM(CASE WHEN pay.status='PAID' THEN pay.amount ELSE 0 END) as paid_amount,
+    SUM(CASE WHEN pay.status='PENDING' THEN pay.amount ELSE 0 END) as pending_amount,
+    SUM(CASE WHEN pay.status='OVERDUE' THEN pay.amount ELSE 0 END) as overdue_amount,
+    MAX(pay.currency) as currency
+  FROM payments pay
+  JOIN players p ON p.id = pay.player_id
+  LEFT JOIN team_players tp ON tp.player_id = p.id AND tp.left_at IS NULL
+  LEFT JOIN teams t ON t.id = tp.team_id
+  WHERE pay.club_id = ? AND pay.status != 'CANCELLED'
+  GROUP BY tp.team_id
+  ORDER BY t.age_group
+`).bind(user.club_id).all();
+const teamStats = teamStatsRes?.results ?? [];
+
+// Load exemptions map
+await db?.prepare(`CREATE TABLE IF NOT EXISTS player_exemptions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  club_id TEXT NOT NULL, player_id TEXT NOT NULL,
+  exemption_type TEXT NOT NULL DEFAULT 'BURSA_SPORTIVA',
+  notes TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(club_id, player_id)
+)`).run().catch(() => {});
+const exemptionsRes = await db?.prepare(
+  'SELECT player_id, exemption_type FROM player_exemptions WHERE club_id = ?'
+).bind(user.club_id).all();
+const exemptMap = new Map(
+  ((exemptionsRes?.results ?? []) as any[]).map((e: any) => [e.player_id, e.exemption_type])
+);
+const exemptTypeLabel: Record<string, string> = {
+  BURSA_SPORTIVA: 'Bursă sportivă',
+  COPIL_ANTRENOR: 'Copil antrenor',
+  CAZ_SOCIAL: 'Caz social',
+};
+
+function fmtAmount(amount: number, currency: string = 'RON') {
+  return `${(amount || 0).toLocaleString('ro-RO')} ${currency}`;
+}
+
+function fmtDate(d: string | null) {
+  if (!d) return '—';
+  return new Date(d).toLocaleDateString('ro-RO', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function statusBadge(status: string) {
+  switch (status) {
+    case 'PAID':      return { cls: 'badge badge-green', label: 'Plătit' };
+    case 'PENDING':   return { cls: 'badge badge-yellow', label: 'În așteptare' };
+    case 'OVERDUE':   return { cls: 'badge badge-red', label: 'Restant' };
+    case 'CANCELLED': return { cls: 'badge', label: 'Anulat', style: 'background:#f3f4f6;color:#6b7280' };
+    default:          return { cls: 'badge', label: status, style: '' };
+  }
+}
 ---
-<AdminLayout title="Pl\u0103\u021bi">
-  <div style="margin-bottom:20px;display:flex;align-items:center;justify-content:space-between">
-    <div>
-      <h2 style="font-size:20px;font-weight:800">Pl\u0103\u021bi</h2>
-      <p style="color:#6b7280;font-size:13px">Cotizan\u021bie \u0219i pl\u0103\u021bi club</p>
-    </div>
-  </div>
+<AdminLayout title="Plăți">
+  {msg === 'platit' && <div class="alert alert-success">Plata a fost marcată ca achitată.</div>}
+  {msg === 'creat' && <div class="alert alert-success">Plata a fost creată cu succes.</div>}
+  {msg === 'bulk_creat' && <div class="alert alert-success">Plăți în masă create cu succes.</div>}
 
-  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px">
-    <div class="card" style="text-align:center">
-      <div style="font-size:24px;font-weight:800;color:#16a34a">{paid.toFixed(0)} RON</div>
-      <div style="font-size:13px;color:#6b7280">\u00cencasat</div>
-    </div>
-    <div class="card" style="text-align:center">
-      <div style="font-size:24px;font-weight:800;color:#f59e0b">{pending}</div>
-      <div style="font-size:13px;color:#6b7280">\u00een a\u0219teptare</div>
-    </div>
-    <div class="card" style="text-align:center">
-      <div style="font-size:24px;font-weight:800;color:#3b82f6">{total.toFixed(0)} RON</div>
-      <div style="font-size:13px;color:#6b7280">Total emis</div>
-    </div>
-  </div>
-
-  <div style="margin-bottom:16px;display:flex;gap:8px">
-    <a href="/admin/payments" class={`btn btn-sm ${!filter ? 'btn-primary' : 'btn-ghost'}`}>Toate</a>
-    <a href="/admin/payments?status=PENDING" class={`btn btn-sm ${filter==='PENDING' ? 'btn-primary' : 'btn-ghost'}`}>\u00cen a\u0219teptare</a>
-    <a href="/admin/payments?status=PAID" class={`btn btn-sm ${filter==='PAID' ? 'btn-primary' : 'btn-ghost'}`}>Pl\u0103tite</a>
-    <a href="/admin/payments?status=OVERDUE" class={`btn btn-sm ${filter==='OVERDUE' ? 'btn-primary' : 'btn-ghost'}`}>Rest\u0103n\u021be</a>
-  </div>
-
-  <div class="card" style="padding:0;overflow:hidden">
-    {payments.length === 0 ? (
-      <div style="padding:60px 24px;text-align:center;color:#9ca3af">
-        <div style="font-size:40px;margin-bottom:12px">\ud83d\udcb3</div>
-        <p style="font-weight:600">Nicio plat\u0103 \u00eenregistrat\u0103</p>
+  <!-- Rapoarte per echipă -->
+  {(teamStats as any[]).length > 0 && (
+    <div class="card" style="margin-bottom:24px;padding:0;overflow:hidden">
+      <div style="padding:14px 20px;background:#f9fafb;border-bottom:1px solid #e5e7eb;font-size:13px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em">
+        Raport per echipă
       </div>
-    ) : (
-      <table class="table">
-        <thead><tr><th>Juc\u0103tor</th><th>Descriere</th><th>Sum\u0103</th><th>Scaden\u021b\u0103</th><th>Status</th></tr></thead>
-        <tbody>
-          {payments.map((p: any) => (
-            <tr>
-              <td style="font-weight:600">{p.first_name} {p.last_name}</td>
-              <td style="color:#6b7280">{p.description || '\u2014'}</td>
-              <td style="font-weight:700">{p.amount} {p.currency}</td>
-              <td style="font-size:13px;color:#6b7280">{p.due_date || '\u2014'}</td>
-              <td>
-                {p.status === 'PAID' && <span class="badge badge-green">Pl\u0103tit</span>}
-                {p.status === 'PENDING' && <span class="badge badge-yellow">\u00cen a\u0219teptare</span>}
-                {p.status === 'OVERDUE' && <span class="badge badge-red">Rest\u0103n\u021b\u0103</span>}
-                {p.status === 'CANCELLED' && <span class="badge">Anulat</span>}
-              </td>
-            </tr>
+      <div style="overflow-x:auto">
+        <table class="table" style="margin:0">
+          <thead><tr>
+            <th>Echipă</th>
+            <th style="text-align:right">Plăți</th>
+            <th style="text-align:right">Încasate</th>
+            <th style="text-align:right">În așteptare</th>
+            <th style="text-align:right">Restante</th>
+          </tr></thead>
+          <tbody>
+            {(teamStats as any[]).map((ts: any) => (
+              <tr>
+                <td style="font-weight:600">{ts.age_group ? ts.age_group + ' — ' : ''}{ts.team_name || 'Fără echipă'}</td>
+                <td style="text-align:right;color:#6b7280">{ts.total_count}</td>
+                <td style="text-align:right;color:#16a34a;font-weight:700">{fmtAmount(ts.paid_amount, ts.currency)}</td>
+                <td style="text-align:right;color:#d97706">{fmtAmount(ts.pending_amount, ts.currency)}</td>
+                <td style="text-align:right;color:#dc2626;font-weight:700">{fmtAmount(ts.overdue_amount, ts.currency)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )}
+
+  <!-- Bulk payment section -->
+  <div class="card" style="margin-bottom:24px">
+    <h3 style="font-size:14px;font-weight:700;margin-bottom:16px;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em">Plăți în masă</h3>
+    <form id="bulk-form" style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:12px;align-items:end;flex-wrap:wrap">
+      <div class="form-group" style="margin:0">
+        <label class="form-label">Echipă</label>
+        <select name="team_id" class="form-select">
+          <option value="">Toate echipele</option>
+          {(teams as any[]).map((t: any) => <option value={t.id}>{t.age_group} — {t.name}</option>)}
+        </select>
+      </div>
+      <div class="form-group" style="margin:0">
+        <label class="form-label">Sumă (RON)</label>
+        <input type="number" name="amount" class="form-input" placeholder="150" min="1" step="0.01" required />
+      </div>
+      <div class="form-group" style="margin:0">
+        <label class="form-label">Descriere</label>
+        <input type="text" name="description" class="form-input" placeholder="Cotizație Aprilie 2025" />
+      </div>
+      <div class="form-group" style="margin:0">
+        <label class="form-label">Scadență</label>
+        <input type="date" name="due_date" class="form-input" />
+      </div>
+      <div>
+        <button type="submit" class="btn btn-primary" style="white-space:nowrap">Generează plăți</button>
+      </div>
+    </form>
+    {exemptMap.size > 0 && (
+    <p style="margin-top:10px;font-size:12px;color:#7c3aed;display:flex;align-items:center;gap:5px">
+      🎓 <span>{exemptMap.size} jucători scutiți vor fi excluși automat din generarea în masă.</span>
+      <a href="/admin/payments/scutiri" style="color:#7c3aed;font-weight:700">Gestionează scutirile →</a>
+    </p>
+  )}
+  <p id="bulk-result" style="margin-top:10px;font-size:13px;color:#16a34a;display:none"></p>
+  </div>
+
+  <!-- Bulk DELETE section -->
+  <div class="card" style="margin-bottom:24px;border-left:4px solid #dc2626">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;cursor:pointer" onclick="window.toggleDeletePanel()">
+      <h3 style="font-size:14px;font-weight:700;color:#991b1b;text-transform:uppercase;letter-spacing:0.05em">🗑 Ștergere plăți în masă</h3>
+      <span id="delete-panel-toggle" style="font-size:12px;color:#9ca3af">▼ Extinde</span>
+    </div>
+    <div id="delete-panel" style="display:none">
+      <p style="font-size:13px;color:#6b7280;margin-bottom:16px">Șterge un grup de plăți <strong>PENDING / RESTANTE</strong> generate greșit. Plățile <strong>PLĂTITE</strong> nu pot fi șterse cu această funcție.</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:12px;align-items:end;flex-wrap:wrap">
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Luna (scadență)</label>
+          <input type="month" id="del-month" class="form-input" placeholder="YYYY-MM" />
+        </div>
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Echipă (opțional)</label>
+          <select id="del-team" class="form-select">
+            <option value="">Toate echipele</option>
+            {(teams as any[]).map((t: any) => <option value={t.id}>{t.age_group} — {t.name}</option>)}
+          </select>
+        </div>
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Descriere conține (opțional)</label>
+          <input type="text" id="del-desc" class="form-input" placeholder="ex: Cotizație Aprilie" />
+        </div>
+        <div>
+          <button type="button" onclick="window.previewDelete()" class="btn btn-ghost" style="border-color:#fca5a5;color:#991b1b;white-space:nowrap">
+            👁 Previzualizare
+          </button>
+        </div>
+      </div>
+      <div style="margin-top:10px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="del-include-overdue" /> Include și RESTANTE
+        </label>
+      </div>
+      <div id="del-preview" style="display:none;margin-top:14px;background:#fef2f2;border:1.5px solid #fca5a5;border-radius:10px;padding:14px 16px">
+        <div style="font-size:14px;font-weight:700;color:#991b1b;margin-bottom:10px" id="del-preview-text"></div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button type="button" onclick="window.executeDelete()" id="btn-execute-delete"
+            style="padding:8px 18px;background:#dc2626;color:white;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">
+            🗑 Șterge definitiv
+          </button>
+          <button type="button" onclick="window.cancelDelete()"
+            style="padding:8px 18px;background:white;color:#6b7280;border:1.5px solid #d1d5db;border-radius:8px;font-size:13px;cursor:pointer;font-family:inherit">
+            Anulează
+          </button>
+        </div>
+      </div>
+      <p id="del-result" style="margin-top:10px;font-size:13px;display:none"></p>
+    </div>
+  </div>
+
+  <!-- Stat cards -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:24px">
+    <div class="card" style="padding:20px;border-top:3px solid #dc2626">
+      <div style="font-size:22px;font-weight:900;color:#dc2626">{fmtAmount(stats.overdue_total as number)}</div>
+      <div style="font-size:12px;color:#6b7280;margin-top:4px">Restante</div>
+    </div>
+    <div class="card" style="padding:20px;border-top:3px solid #d97706">
+      <div style="font-size:22px;font-weight:900;color:#d97706">{fmtAmount(stats.pending_total as number)}</div>
+      <div style="font-size:12px;color:#6b7280;margin-top:4px">În așteptare</div>
+    </div>
+    <div class="card" style="padding:20px;border-top:3px solid #16a34a">
+      <div style="font-size:22px;font-weight:900;color:#16a34a">{fmtAmount(stats.paid_this_month as number)}</div>
+      <div style="font-size:12px;color:#6b7280;margin-top:4px">Plătite luna aceasta</div>
+    </div>
+  </div>
+
+  <!-- Header + add button -->
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:12px">
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      {[
+        { val: '', label: 'Toate' },
+        { val: 'OVERDUE', label: 'Restante' },
+        { val: 'PENDING', label: 'Pendente' },
+        { val: 'PAID', label: 'Plătite' },
+      ].map(tab => (
+        <a href={`/admin/payments?status=${tab.val}${teamFilter ? `&team_id=${teamFilter}` : ''}${playerSearch ? `&q=${playerSearch}` : ''}`}
+          style={`padding:6px 16px;border-radius:99px;font-size:13px;font-weight:600;text-decoration:none;border:1px solid;white-space:nowrap;${statusFilter === tab.val ? 'background:#1C0808;color:white;border-color:#1C0808' : 'background:white;color:#6b7280;border-color:#e5e7eb'}`}>
+          {tab.label}
+        </a>
+      ))}
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <!-- Export buttons -->
+      <div style="display:flex;gap:6px">
+        <a href={`/api/admin/payments/export?status=PAID${teamFilter ? `&team_id=${teamFilter}` : ''}${playerSearch ? `&q=${encodeURIComponent(playerSearch)}` : ''}`}
+          style="display:inline-flex;align-items:center;gap:5px;padding:7px 13px;border-radius:8px;font-size:12px;font-weight:700;text-decoration:none;background:#f0fdf4;color:#16a34a;border:1.5px solid #bbf7d0">
+          ↓ CSV Plătite
+        </a>
+        <a href={`/api/admin/payments/export?status=OVERDUE${teamFilter ? `&team_id=${teamFilter}` : ''}${playerSearch ? `&q=${encodeURIComponent(playerSearch)}` : ''}`}
+          style="display:inline-flex;align-items:center;gap:5px;padding:7px 13px;border-radius:8px;font-size:12px;font-weight:700;text-decoration:none;background:#fef2f2;color:#dc2626;border:1.5px solid #fecaca">
+          ↓ CSV Restante
+        </a>
+        <a href={`/api/admin/payments/export${statusFilter || teamFilter || playerSearch ? `?status=${statusFilter}${teamFilter ? `&team_id=${teamFilter}` : ''}${playerSearch ? `&q=${encodeURIComponent(playerSearch)}` : ''}` : ''}`}
+          style="display:inline-flex;align-items:center;gap:5px;padding:7px 13px;border-radius:8px;font-size:12px;font-weight:700;text-decoration:none;background:#f9fafb;color:#374151;border:1.5px solid #e5e7eb">
+          ↓ Export curent
+        </a>
+      </div>
+      <a href="/admin/payments/scutiri" style="display:inline-flex;align-items:center;gap:5px;padding:7px 13px;border-radius:8px;font-size:12px;font-weight:700;text-decoration:none;background:#f5f3ff;color:#7c3aed;border:1.5px solid #ddd6fe">
+        🎓 Scutiri ({exemptMap.size})
+      </a>
+      <button onclick="document.getElementById('modal-new-payment').style.display='flex'" class="btn btn-primary">
+        + Plată nouă
+      </button>
+    </div>
+  </div>
+
+  <!-- Extra filters -->
+  <div class="card" style="margin-bottom:16px;padding:12px 16px">
+    <form method="GET" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+      {statusFilter && <input type="hidden" name="status" value={statusFilter} />}
+      <div>
+        <label class="form-label" style="margin-bottom:4px">Echipă</label>
+        <select name="team_id" class="form-select" style="width:180px" onchange="this.form.submit()">
+          <option value="">Toate echipele</option>
+          {(teams as any[]).map((t: any) => (
+            <option value={t.id} selected={t.id === teamFilter}>{t.age_group} — {t.name}</option>
           ))}
+        </select>
+      </div>
+      <div>
+        <label class="form-label" style="margin-bottom:4px">Caută jucător</label>
+        <input type="text" name="q" class="form-input" style="width:200px" value={playerSearch} placeholder="Nume..." />
+      </div>
+      <button type="submit" class="btn btn-ghost" style="font-size:13px">Filtrează</button>
+      {(teamFilter || playerSearch) && (
+        <a href={`/admin/payments${statusFilter ? `?status=${statusFilter}` : ''}`} class="btn btn-ghost" style="font-size:13px">Resetează</a>
+      )}
+    </form>
+  </div>
+
+  {(payments as any[]).length === 0 ? (
+    <div class="card" style="text-align:center;padding:48px">
+      <p style="font-size:40px;margin-bottom:12px">💰</p>
+      <p style="font-size:16px;font-weight:600;color:#374151">Nicio plată găsită</p>
+      <button onclick="document.getElementById('modal-new-payment').style.display='flex'" class="btn btn-primary" style="margin-top:20px">+ Plată nouă</button>
+    </div>
+  ) : (
+    <div class="card" style="padding:0;overflow:hidden">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Jucător</th>
+            <th>Echipă</th>
+            <th>Sumă</th>
+            <th>Descriere</th>
+            <th>Scadență</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {(payments as any[]).map((pay: any) => {
+            const sb = statusBadge(pay.status);
+            return (
+              <tr style={pay.status === 'OVERDUE' ? 'background:#fff7f7' : ''}>
+                <td>
+                  <span style="font-weight:600">{pay.first_name} {pay.last_name}</span>
+                  {(exemptMap as any).get(pay.player_id) && (
+                    <span style={`display:inline-block;margin-left:6px;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700;${
+                      (exemptMap as any).get(pay.player_id) === 'BURSA_SPORTIVA' ? 'background:#f5f3ff;color:#7c3aed' :
+                      (exemptMap as any).get(pay.player_id) === 'COPIL_ANTRENOR' ? 'background:#f0f9ff;color:#0369a1' :
+                      'background:#fffbeb;color:#b45309'
+                    }`}>
+                      {exemptTypeLabel[(exemptMap as any).get(pay.player_id) as string] || 'Scutit'}
+                    </span>
+                  )}
+                </td>
+                <td style="font-size:13px;color:#374151">
+                  {pay.team_name ? `${pay.team_name}` : '—'}
+                  {pay.age_group && <span style="display:block;font-size:11px;color:#9ca3af">{pay.age_group}</span>}
+                </td>
+                <td style="font-weight:700;white-space:nowrap">{fmtAmount(pay.amount, pay.currency)}</td>
+                <td style="font-size:13px;color:#374151;max-width:200px">
+                  <span style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{pay.description || '—'}</span>
+                </td>
+                <td style="font-size:13px;white-space:nowrap">{fmtDate(pay.due_date)}</td>
+                <td>
+                  <span class={sb.cls} style={(sb as any).style || ''}>{sb.label}</span>
+                  {pay.paid_at && <span style="display:block;font-size:11px;color:#9ca3af;margin-top:2px">la {fmtDate(pay.paid_at)}</span>}
+                </td>
+                <td>
+                  <div style="display:flex;gap:4px;flex-wrap:wrap">
+                    <button onclick={`window.openEditModal('${pay.id}')`} class="btn btn-ghost" style="font-size:11px;padding:4px 9px">✏️ Edit</button>
+                    {pay.status !== 'PAID' && pay.status !== 'CANCELLED' && (
+                      <button onclick={`window.markPaid('${pay.id}')`} class="btn btn-ghost" style="font-size:11px;padding:4px 9px;color:#16a34a;border-color:#bbf7d0;white-space:nowrap">✓ Plătit</button>
+                    )}
+                    {pay.status !== 'CANCELLED' && (
+                      <button onclick={`window.cancelPayment('${pay.id}')`} class="btn btn-ghost" style="font-size:11px;padding:4px 9px;color:#dc2626;border-color:#fecaca">✕</button>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
-    )}
+    </div>
+  )}
+
+  <!-- Modal Edit Plată -->
+  <div id="modal-edit-payment" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;align-items:center;justify-content:center;padding:20px">
+    <div class="card" style="width:100%;max-width:480px;padding:28px;max-height:90vh;overflow-y:auto">
+      <h3 style="font-size:16px;font-weight:700;margin-bottom:20px">Editează plata</h3>
+      <div class="form-group">
+        <label class="form-label">Sumă *</label>
+        <div style="display:flex;gap:8px">
+          <input type="number" id="edit-amount" class="form-input" min="0.01" step="0.01" style="flex:1" />
+          <select id="edit-currency" class="form-select" style="width:90px">
+            <option value="RON">RON</option>
+            <option value="EUR">EUR</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Descriere</label>
+        <input type="text" id="edit-description" class="form-input" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Scadență</label>
+        <input type="date" id="edit-due-date" class="form-input" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Modalitate plată</label>
+        <select id="edit-method" class="form-select">
+          <option value="">—</option>
+          <option value="NUMERAR">Numerar (cash)</option>
+          <option value="TRANSFER">Transfer bancar</option>
+          <option value="CARD">Card bancar</option>
+          <option value="ONLINE">Online</option>
+          <option value="VOUCHER">Voucher</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Referință / nr. chitanță</label>
+        <input type="text" id="edit-reference" class="form-input" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Status</label>
+        <select id="edit-status" class="form-select">
+          <option value="PENDING">În așteptare</option>
+          <option value="PAID">Plătit</option>
+          <option value="OVERDUE">Restant</option>
+          <option value="CANCELLED">Anulat</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:8px">
+        <button type="button" onclick="window.saveEdit()" class="btn btn-primary" style="flex:1">Salvează</button>
+        <button type="button" onclick="document.getElementById('modal-edit-payment').style.display='none'" class="btn btn-ghost">Anulează</button>
+      </div>
+      <p id="edit-error" style="color:#dc2626;font-size:13px;margin-top:8px;display:none"></p>
+    </div>
+  </div>
+
+  <!-- Modal Plată nouă -->
+  <div id="modal-new-payment" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;align-items:center;justify-content:center;padding:20px">
+    <div class="card" style="width:100%;max-width:480px;padding:28px;max-height:90vh;overflow-y:auto">
+      <h3 style="font-size:16px;font-weight:700;margin-bottom:20px">Plată nouă</h3>
+      <form id="form-new-payment" style="display:block">
+
+        <div class="form-group">
+          <label class="form-label">Jucător *</label>
+          <select name="player_id" class="form-select" required>
+            <option value="">Selectează jucătorul...</option>
+            {(allPlayers as any[]).map((p: any) => (
+              <option value={p.id}>{p.first_name} {p.last_name}{p.team_name ? ` — ${p.team_name}` : ''}</option>
+            ))}
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Sumă *</label>
+          <input type="number" name="amount" class="form-input" min="1" step="0.01" placeholder="150" required />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Monedă</label>
+          <select name="currency" class="form-select">
+            <option value="RON" selected>RON</option>
+            <option value="EUR">EUR</option>
+            <option value="USD">USD</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Denumire *</label>
+          <select id="desc-preset" class="form-select" onchange="window.handleDescPreset(this)">
+            <option value="">Selectează tipul...</option>
+            <option value="Cotizație lunară">Cotizație lunară</option>
+            <option value="Echipament de joc">Echipament de joc</option>
+            <option value="Echipament de prezentare">Echipament de prezentare</option>
+            <option value="Taxa de înscriere">Taxa de înscriere</option>
+            <option value="Taxa de cantonament">Taxa de cantonament</option>
+            <option value="Taxa de turneu">Taxa de turneu</option>
+            <option value="__custom__">+ Denumire nouă (completează manual)</option>
+          </select>
+          <input type="text" name="description" id="desc-custom" class="form-input"
+                 style="margin-top:8px;display:none"
+                 placeholder="Scrie denumirea plății..." />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Modalitate de plată</label>
+          <select name="method" class="form-select">
+            <option value="">Selectează...</option>
+            <option value="NUMERAR">Numerar (cash)</option>
+            <option value="TRANSFER">Transfer bancar</option>
+            <option value="CARD">Card bancar</option>
+            <option value="ONLINE">Online (link)</option>
+            <option value="VOUCHER">Voucher</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Serie chitanță</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="text" id="receipt-serie" class="form-input" style="width:120px;text-transform:uppercase"
+                   placeholder="ex: CHT" maxlength="10"
+                   oninput="this.value=this.value.toUpperCase()" />
+            <button type="button" onclick="window.generateReceiptNr()" class="btn btn-ghost" style="font-size:12px;padding:8px 14px;white-space:nowrap">
+              Generează nr.
+            </button>
+          </div>
+          <p style="font-size:11px;color:#9ca3af;margin-top:4px">Tastează seria (ex: CHT) și apasă butonul pentru nr. următor automat.</p>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Referință / nr. chitanță</label>
+          <input type="text" name="reference" id="reference-input" class="form-input" placeholder="ex: CHT-001, OP-202401..." />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Scadență</label>
+          <input type="date" name="due_date" class="form-input" />
+        </div>
+
+        <div style="display:flex;gap:10px;margin-top:8px">
+          <button type="button" id="btn-submit-payment" onclick="window.submitNewPayment()" class="btn btn-primary" style="flex:1">Creează plata</button>
+          <button type="button" onclick="document.getElementById('modal-new-payment').style.display='none'" class="btn btn-ghost">Anulează</button>
+        </div>
+      </form>
+    </div>
   </div>
 </AdminLayout>
+
+<script id="payments-json" type="application/json" set:html={JSON.stringify(payments)}></script>
+
+<script is:inline>
+var _editPaymentId = null;
+
+window.openEditModal = function(id) {
+  var raw = document.getElementById('payments-json');
+  var list = raw ? JSON.parse(raw.textContent || '[]') : [];
+  var pay = list.find(function(p) { return p.id === id; });
+  if (!pay) return;
+  _editPaymentId = id;
+  document.getElementById('edit-amount').value = pay.amount || '';
+  document.getElementById('edit-currency').value = pay.currency || 'RON';
+  document.getElementById('edit-description').value = pay.description || '';
+  document.getElementById('edit-due-date').value = (pay.due_date || '').split('T')[0];
+  document.getElementById('edit-method').value = pay.payment_method || '';
+  document.getElementById('edit-reference').value = pay.reference || '';
+  document.getElementById('edit-status').value = pay.status || 'PENDING';
+  document.getElementById('edit-error').style.display = 'none';
+  document.getElementById('modal-edit-payment').style.display = 'flex';
+};
+
+window.saveEdit = async function() {
+  if (!_editPaymentId) return;
+  var amount = parseFloat(document.getElementById('edit-amount').value);
+  if (!amount || amount <= 0) { alert('Suma trebuie să fie pozitivă.'); return; }
+  var body = {
+    amount: amount,
+    currency: document.getElementById('edit-currency').value,
+    description: document.getElementById('edit-description').value.trim(),
+    due_date: document.getElementById('edit-due-date').value || null,
+    payment_method: document.getElementById('edit-method').value || null,
+    reference: document.getElementById('edit-reference').value.trim() || null,
+    status: document.getElementById('edit-status').value,
+  };
+  try {
+    var res = await fetch('/api/admin/payments/' + _editPaymentId, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) {
+      window.location.reload();
+    } else {
+      var err = await res.json().catch(function() { return {}; });
+      var el = document.getElementById('edit-error');
+      el.textContent = 'Eroare: ' + (err.error || res.statusText);
+      el.style.display = 'block';
+    }
+  } catch(e) {
+    alert('Eroare de rețea: ' + e);
+  }
+};
+
+window.cancelPayment = async function(id) {
+  if (!confirm('Anulezi această plată? Acțiunea poate fi revertită prin editare.')) return;
+  try {
+    var res = await fetch('/api/admin/payments/' + id, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'CANCELLED' }),
+    });
+    if (res.ok) {
+      window.location.reload();
+    } else {
+      alert('Eroare la anulare.');
+    }
+  } catch(e) {
+    alert('Eroare de rețea.');
+  }
+};
+
+document.getElementById('modal-edit-payment').addEventListener('click', function(e) {
+  if (e.target === this) this.style.display = 'none';
+});
+
+window.generateReceiptNr = async function() {
+  const serieInput = document.getElementById('receipt-serie');
+  const serie = (serieInput ? serieInput.value : '').trim().toUpperCase();
+  if (!serie) {
+    alert('Tastează seria chitanței mai întâi (ex: CHT).');
+    if (serieInput) serieInput.focus();
+    return;
+  }
+  const btn = document.querySelector('button[onclick="window.generateReceiptNr()"]');
+  if (btn) { btn.disabled = true; btn.textContent = '...'; }
+  try {
+    const res = await fetch('/api/admin/payments/next-reference?serie=' + encodeURIComponent(serie));
+    if (!res.ok) { alert('Eroare server: ' + res.status); return; }
+    const data = await res.json();
+    const refInput = document.getElementById('reference-input');
+    if (refInput) {
+      refInput.value = data.next || serie + '-001';
+      refInput.focus();
+    }
+    localStorage.setItem('payment_serie', serie);
+  } catch(e) {
+    alert('Eroare de rețea la generare: ' + e);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Generează nr.'; }
+  }
+};
+
+// Restore last used serie from localStorage
+document.addEventListener('DOMContentLoaded', function() {
+  const saved = localStorage.getItem('payment_serie');
+  if (saved) {
+    const el = document.getElementById('receipt-serie');
+    if (el) el.value = saved;
+  }
+});
+
+window.handleDescPreset = function(sel) {
+  const custom = document.getElementById('desc-custom');
+  if (sel.value === '__custom__') {
+    custom.style.display = 'block';
+    custom.required = true;
+    custom.focus();
+  } else {
+    custom.style.display = 'none';
+    custom.required = false;
+    custom.value = '';
+  }
+};
+
+window.markPaid = async function(paymentId) {
+  if (!confirm('Marchezi această plată ca achitată?')) return;
+  try {
+    const res = await fetch('/api/admin/payments/' + paymentId, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'PAID' }),
+    });
+    if (res.ok) {
+      window.location.href = '/admin/payments?msg=platit' + (window.location.search ? '&' + window.location.search.slice(1) : '');
+    } else {
+      alert('Eroare la actualizare.');
+    }
+  } catch(e) {
+    alert('Eroare de rețea.');
+  }
+};
+
+window.submitNewPayment = async function() {
+  const form = document.getElementById('form-new-payment');
+  if (!form) { alert('Eroare UI: formularul nu a fost găsit.'); return; }
+
+  const playerSel = form.querySelector('[name="player_id"]');
+  const amountEl = form.querySelector('[name="amount"]');
+  const currencyEl = form.querySelector('[name="currency"]');
+  const methodEl = form.querySelector('[name="method"]');
+  const referenceEl = document.getElementById('reference-input');
+  const dueDateEl = form.querySelector('[name="due_date"]');
+
+  const player_id = playerSel ? playerSel.value : '';
+  const amount = amountEl ? parseFloat(amountEl.value) : NaN;
+  const currency = currencyEl ? currencyEl.value : 'RON';
+
+  const preset = document.getElementById('desc-preset') ? document.getElementById('desc-preset').value : '';
+  const custom = document.getElementById('desc-custom') ? document.getElementById('desc-custom').value.trim() : '';
+  const description = preset === '__custom__' ? custom : preset;
+
+  const method = methodEl ? methodEl.value : '';
+  const reference = referenceEl ? referenceEl.value.trim() : '';
+  const due_date = dueDateEl ? dueDateEl.value : '';
+
+  if (!player_id) { alert('Selectează jucătorul.'); return; }
+  if (!amount || isNaN(amount) || amount <= 0) { alert('Completează suma (număr pozitiv).'); return; }
+  if (!description) { alert('Selectează sau completează denumirea plății.'); return; }
+
+  const btn = document.getElementById('btn-submit-payment');
+  if (btn) { btn.disabled = true; btn.textContent = 'Se salvează...'; }
+
+  try {
+    const res = await fetch('/api/admin/payments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        player_id,
+        amount,
+        currency: currency || 'RON',
+        description,
+        method: method || undefined,
+        reference: reference || undefined,
+        due_date: due_date || undefined,
+      }),
+    });
+    if (res.ok) {
+      window.location.href = '/admin/payments?msg=creat';
+    } else {
+      const e = await res.json().catch(() => ({}));
+      alert('Eroare la creare: ' + (e.error || JSON.stringify(e.details || {}) || res.statusText));
+      if (btn) { btn.disabled = false; btn.textContent = 'Creează plata'; }
+    }
+  } catch(e) {
+    alert('Eroare de rețea: ' + e);
+    if (btn) { btn.disabled = false; btn.textContent = 'Creează plata'; }
+  }
+};
+
+// Close modal on backdrop click
+document.getElementById('modal-new-payment').addEventListener('click', function(e) {
+  if (e.target === this) this.style.display = 'none';
+});
+
+// Bulk payment form
+document.getElementById('bulk-form')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const form = e.target;
+  const btn = form.querySelector('button[type="submit"]');
+  const resultEl = document.getElementById('bulk-result');
+  btn.disabled = true;
+  btn.textContent = 'Se generează...';
+  try {
+    const fd = new FormData(form);
+    const r = await fetch('/api/admin/payments/bulk', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (resultEl) {
+      resultEl.style.display = 'block';
+      if (d.ok) {
+        resultEl.style.color = '#16a34a';
+        var msg = '✓ ' + d.created + ' plăți create cu succes';
+        if (d.exempted > 0) msg += ' · ' + d.exempted + ' jucători scutiți ignorați';
+        resultEl.textContent = msg;
+        form.reset();
+        setTimeout(() => window.location.reload(), 1500);
+      } else {
+        resultEl.style.color = '#dc2626';
+        resultEl.textContent = `Eroare: ${d.error || 'necunoscută'}`;
+      }
+    }
+  } catch (err) {
+    if (resultEl) {
+      resultEl.style.display = 'block';
+      resultEl.style.color = '#dc2626';
+      resultEl.textContent = 'Eroare de rețea. Încearcă din nou.';
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Generează plăți';
+  }
+});
+
+// ── Bulk DELETE panel ──────────────────────────────────
+window.toggleDeletePanel = function() {
+  var panel = document.getElementById('delete-panel');
+  var toggle = document.getElementById('delete-panel-toggle');
+  if (!panel) return;
+  var visible = panel.style.display !== 'none';
+  panel.style.display = visible ? 'none' : 'block';
+  if (toggle) toggle.textContent = visible ? '▼ Extinde' : '▲ Restrânge';
+};
+
+function getDeleteParams() {
+  var month    = (document.getElementById('del-month'))?.value || '';
+  var team     = (document.getElementById('del-team'))?.value || '';
+  var desc     = (document.getElementById('del-desc'))?.value.trim() || '';
+  var overdue  = (document.getElementById('del-include-overdue'))?.checked;
+  var statuses = overdue ? ['PENDING','OVERDUE'] : ['PENDING'];
+  return { month, team, desc, statuses };
+}
+
+window.previewDelete = async function() {
+  var { month, team, desc, statuses } = getDeleteParams();
+  if (!month && !desc) {
+    alert('Selectează cel puțin luna sau introduceți o descriere pentru a filtra.');
+    return;
+  }
+  var qs = new URLSearchParams();
+  if (month)  qs.set('month', month);
+  if (team)   qs.set('team_id', team);
+  if (desc)   qs.set('description', desc);
+  qs.set('statuses', statuses.join(','));
+
+  var previewEl = document.getElementById('del-preview');
+  var previewText = document.getElementById('del-preview-text');
+  var resultEl = document.getElementById('del-result');
+  if (resultEl) { resultEl.style.display = 'none'; }
+
+  try {
+    var r = await fetch('/api/admin/payments/bulk-delete?' + qs.toString());
+    var d = await r.json();
+    var cnt = d.count || 0;
+    if (previewText) {
+      if (cnt === 0) {
+        previewText.textContent = '✓ Nu există plăți care corespund filtrelor selectate.';
+        if (previewEl) previewEl.style.background = '#f0fdf4';
+        if (previewEl) previewEl.style.borderColor = '#86efac';
+        var execBtn = document.getElementById('btn-execute-delete');
+        if (execBtn) execBtn.style.display = 'none';
+      } else {
+        previewText.textContent = `⚠ Vor fi șterse definitiv ${cnt} plăți (${statuses.join(', ')}).`;
+        if (previewEl) previewEl.style.background = '#fef2f2';
+        if (previewEl) previewEl.style.borderColor = '#fca5a5';
+        var execBtn2 = document.getElementById('btn-execute-delete');
+        if (execBtn2) execBtn2.style.display = '';
+      }
+    }
+    if (previewEl) previewEl.style.display = 'block';
+  } catch(e) {
+    alert('Eroare la previzualizare: ' + e);
+  }
+};
+
+window.executeDelete = async function() {
+  var { month, team, desc, statuses } = getDeleteParams();
+  var execBtn = document.getElementById('btn-execute-delete');
+  if (execBtn) { execBtn.disabled = true; execBtn.textContent = 'Se șterge...'; }
+  try {
+    var r = await fetch('/api/admin/payments/bulk-delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ month, team_id: team, description: desc, statuses }),
+    });
+    var d = await r.json();
+    var resultEl = document.getElementById('del-result');
+    var previewEl = document.getElementById('del-preview');
+    if (previewEl) previewEl.style.display = 'none';
+    if (resultEl) {
+      resultEl.style.display = 'block';
+      if (d.ok) {
+        resultEl.style.color = '#16a34a';
+        resultEl.textContent = `✓ ${d.deleted} plăți șterse cu succes.`;
+        setTimeout(() => window.location.reload(), 1500);
+      } else {
+        resultEl.style.color = '#dc2626';
+        resultEl.textContent = 'Eroare: ' + (d.error || 'necunoscută');
+      }
+    }
+  } catch(e) {
+    alert('Eroare de rețea: ' + e);
+  } finally {
+    if (execBtn) { execBtn.disabled = false; execBtn.textContent = '🗑 Șterge definitiv'; }
+  }
+};
+
+window.cancelDelete = function() {
+  var previewEl = document.getElementById('del-preview');
+  if (previewEl) previewEl.style.display = 'none';
+};
+</script>

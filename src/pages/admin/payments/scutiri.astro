@@ -1,0 +1,251 @@
+---
+export const prerender = false;
+import AdminLayout from '../../../layouts/AdminLayout.astro';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+if ((user as any).role !== 'ADMIN') return Astro.redirect('/admin/payments');
+
+const db = (Astro.locals as any).runtime?.env?.DB;
+const clubId = user.club_id;
+
+// Ensure table exists
+await db?.prepare(`CREATE TABLE IF NOT EXISTS player_exemptions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  club_id TEXT NOT NULL, player_id TEXT NOT NULL,
+  exemption_type TEXT NOT NULL DEFAULT 'BURSA_SPORTIVA',
+  notes TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(club_id, player_id)
+)`).run().catch(() => {});
+
+// Load all active players with team info
+const playersRes = await db?.prepare(`
+  SELECT p.id, p.first_name, p.last_name, t.name as team_name, t.age_group,
+         pe.exemption_type, pe.notes as ex_notes, pe.id as ex_id
+  FROM players p
+  LEFT JOIN team_players tp ON tp.player_id = p.id AND tp.left_at IS NULL
+  LEFT JOIN teams t ON t.id = tp.team_id
+  LEFT JOIN player_exemptions pe ON pe.player_id = p.id AND pe.club_id = p.club_id
+  WHERE p.club_id = ? AND p.status = 'ACTIVE'
+  ORDER BY
+    CASE WHEN pe.id IS NOT NULL THEN 0 ELSE 1 END,
+    p.last_name, p.first_name
+`).bind(clubId).all();
+const players = playersRes?.results ?? [];
+
+const exemptCount = (players as any[]).filter((p: any) => p.exemption_type).length;
+
+const typeLabels: Record<string, { label: string; color: string; bg: string }> = {
+  BURSA_SPORTIVA: { label: 'Bursă sportivă', color: '#7c3aed', bg: '#f5f3ff' },
+  COPIL_ANTRENOR: { label: 'Copil antrenor', color: '#0369a1', bg: '#f0f9ff' },
+  CAZ_SOCIAL:     { label: 'Caz social',     color: '#b45309', bg: '#fffbeb' },
+};
+---
+<AdminLayout title="Scutiri de plată">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px">
+    <div>
+      <a href="/admin/payments" style="font-size:13px;color:#8B1A1A;text-decoration:none">← Înapoi la plăți</a>
+      <h1 style="font-size:20px;font-weight:800;color:#1C0808;margin-top:6px">Scutiri de plată</h1>
+      <p style="font-size:13px;color:#6b7280;margin-top:2px">
+        Jucătorii scutiți nu primesc plăți generate automat la generarea în masă.
+        {exemptCount > 0 && <strong style="color:#7c3aed"> {exemptCount} jucători scutiți activ.</strong>}
+      </p>
+    </div>
+  </div>
+
+  <!-- Legend -->
+  <div class="card" style="margin-bottom:20px;padding:14px 20px">
+    <div style="font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:10px">Tipuri de scutire</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      {Object.entries(typeLabels).map(([key, t]) => (
+        <span style={`display:inline-flex;align-items:center;gap:6px;padding:5px 14px;border-radius:20px;font-size:13px;font-weight:600;background:${t.bg};color:${t.color};border:1.5px solid ${t.color}30`}>
+          {t.label}
+        </span>
+      ))}
+    </div>
+    <p style="font-size:12px;color:#9ca3af;margin-top:10px">
+      Scutirile se aplică doar la generarea în masă (bulk). Poți adăuga manual o plată oricând.
+    </p>
+  </div>
+
+  <!-- Players table -->
+  <div class="card" style="padding:0;overflow:hidden">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Jucător</th>
+          <th>Echipă</th>
+          <th style="text-align:center">Tip scutire</th>
+          <th>Observații</th>
+          <th style="text-align:center">Acțiuni</th>
+        </tr>
+      </thead>
+      <tbody>
+        {(players as any[]).map((p: any) => {
+          const t = p.exemption_type ? typeLabels[p.exemption_type] : null;
+          return (
+            <tr id={`row-${p.id}`} style={p.exemption_type ? 'background:#fafaf9' : ''}>
+              <td>
+                <div style="display:flex;align-items:center;gap:10px">
+                  <div style={`width:34px;height:34px;border-radius:50%;${p.exemption_type ? `background:${typeLabels[p.exemption_type]?.color || '#8B1A1A'}` : 'background:#8B1A1A'};color:white;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;flex-shrink:0`}>
+                    {p.first_name?.[0]}{p.last_name?.[0]}
+                  </div>
+                  <span style="font-size:14px;font-weight:600">{p.first_name} {p.last_name}</span>
+                </div>
+              </td>
+              <td style="font-size:13px;color:#374151">
+                {p.team_name || '—'}
+                {p.age_group && <span style="display:block;font-size:11px;color:#9ca3af">{p.age_group}</span>}
+              </td>
+              <td style="text-align:center">
+                {t
+                  ? <span style={`display:inline-block;padding:4px 12px;border-radius:12px;font-size:12px;font-weight:700;background:${t.bg};color:${t.color}`}>{t.label}</span>
+                  : <span style="font-size:12px;color:#d1d5db">—</span>
+                }
+              </td>
+              <td style="font-size:13px;color:#6b7280;max-width:200px">
+                <span id={`notes-${p.id}`}>{p.ex_notes || ''}</span>
+              </td>
+              <td style="text-align:center;white-space:nowrap">
+                {p.exemption_type
+                  ? (
+                    <div style="display:flex;gap:6px;justify-content:center">
+                      <button onclick={`window.editExemption('${p.id}','${p.exemption_type}',${JSON.stringify(p.ex_notes || '')})`}
+                        class="btn btn-ghost" style="font-size:12px;padding:5px 10px">Modifică</button>
+                      <button onclick={`window.removeExemption('${p.id}')`}
+                        class="btn btn-danger" style="font-size:12px;padding:5px 10px">Scoate</button>
+                    </div>
+                  )
+                  : (
+                    <button onclick={`window.addExemption('${p.id}','${p.first_name} ${p.last_name}')`}
+                      class="btn btn-ghost" style="font-size:12px;padding:5px 14px;border-color:#7c3aed;color:#7c3aed">
+                      + Adaugă scutire
+                    </button>
+                  )
+                }
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+    {(players as any[]).length === 0 && (
+      <p style="text-align:center;padding:48px;color:#9ca3af;font-size:14px">Nu există jucători activi.</p>
+    )}
+  </div>
+
+  <!-- Modal add/edit exemption -->
+  <div id="modal-exemption" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;align-items:center;justify-content:center;padding:20px">
+    <div class="card" style="width:100%;max-width:420px;padding:28px">
+      <h3 id="modal-exemption-title" style="font-size:16px;font-weight:700;margin-bottom:20px">Adaugă scutire</h3>
+
+      <div class="form-group">
+        <label class="form-label">Tip scutire *</label>
+        <div style="display:flex;flex-direction:column;gap:10px;margin-top:6px" id="exemption-types">
+          {Object.entries(typeLabels).map(([key, t]) => (
+            <label style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-radius:10px;border:2px solid #e5e7eb;cursor:pointer;transition:border-color 0.15s" id={`type-card-${key}`}>
+              <input type="radio" name="exemption_type" value={key}
+                style="width:18px;height:18px;accent-color:#7c3aed;cursor:pointer"
+                onchange={`window.selectExemptionType('${key}')`} />
+              <div>
+                <span style={`font-size:14px;font-weight:700;color:${t.color}`}>{t.label}</span>
+                <div style="font-size:12px;color:#9ca3af;margin-top:1px">
+                  {key === 'BURSA_SPORTIVA' && 'Jucătorul beneficiază de bursă sportivă'}
+                  {key === 'COPIL_ANTRENOR' && 'Copil al unui antrenor din club'}
+                  {key === 'CAZ_SOCIAL' && 'Caz social aprobat de conducere'}
+                </div>
+              </div>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <div class="form-group" style="margin-top:16px">
+        <label class="form-label">Observații (opțional)</label>
+        <input type="text" id="exemption-notes" class="form-input" placeholder="ex: Aprobat de consiliu, valid până în dec. 2025" />
+      </div>
+
+      <input type="hidden" id="exemption-player-id" value="" />
+
+      <div style="display:flex;gap:10px;margin-top:20px">
+        <button type="button" onclick="window.saveExemption()" class="btn btn-primary" style="flex:1;background:#7c3aed;border-color:#7c3aed">Salvează scutirea</button>
+        <button type="button" onclick="document.getElementById('modal-exemption').style.display='none'" class="btn btn-ghost">Anulează</button>
+      </div>
+    </div>
+  </div>
+</AdminLayout>
+
+<script is:inline>
+window.addExemption = function(playerId, playerName) {
+  document.getElementById('exemption-player-id').value = playerId;
+  document.getElementById('modal-exemption-title').textContent = 'Adaugă scutire — ' + playerName;
+  document.getElementById('exemption-notes').value = '';
+  document.querySelectorAll('input[name="exemption_type"]').forEach(function(r) { r.checked = false; });
+  document.querySelectorAll('[id^="type-card-"]').forEach(function(c) { c.style.borderColor = '#e5e7eb'; });
+  document.getElementById('modal-exemption').style.display = 'flex';
+};
+
+window.editExemption = function(playerId, currentType, currentNotes) {
+  document.getElementById('exemption-player-id').value = playerId;
+  document.getElementById('modal-exemption-title').textContent = 'Modifică scutire';
+  document.getElementById('exemption-notes').value = currentNotes || '';
+  document.querySelectorAll('input[name="exemption_type"]').forEach(function(r) {
+    r.checked = r.value === currentType;
+  });
+  document.querySelectorAll('[id^="type-card-"]').forEach(function(c) { c.style.borderColor = '#e5e7eb'; });
+  var active = document.getElementById('type-card-' + currentType);
+  if (active) active.style.borderColor = '#7c3aed';
+  document.getElementById('modal-exemption').style.display = 'flex';
+};
+
+window.selectExemptionType = function(key) {
+  document.querySelectorAll('[id^="type-card-"]').forEach(function(c) { c.style.borderColor = '#e5e7eb'; });
+  var card = document.getElementById('type-card-' + key);
+  if (card) card.style.borderColor = '#7c3aed';
+};
+
+window.saveExemption = async function() {
+  var playerId = document.getElementById('exemption-player-id').value;
+  var typeEl = document.querySelector('input[name="exemption_type"]:checked');
+  var notes = document.getElementById('exemption-notes').value.trim();
+  if (!typeEl) { alert('Selectează tipul de scutire.'); return; }
+  var exemption_type = typeEl.value;
+  try {
+    var res = await fetch('/api/admin/payments/scutiri', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ player_id: playerId, exemption_type: exemption_type, notes: notes || null }),
+    });
+    if (res.ok) {
+      window.location.reload();
+    } else {
+      var e = await res.json().catch(function() { return {}; });
+      alert('Eroare: ' + (e.error || res.statusText));
+    }
+  } catch(e) {
+    alert('Eroare de rețea: ' + e);
+  }
+};
+
+window.removeExemption = async function(playerId) {
+  if (!confirm('Scoți scutirea pentru acest jucător? El va primi plăți generate automat din nou.')) return;
+  try {
+    var res = await fetch('/api/admin/payments/scutiri', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ player_id: playerId }),
+    });
+    if (res.ok) {
+      window.location.reload();
+    } else {
+      alert('Eroare la ștergere.');
+    }
+  } catch(e) {
+    alert('Eroare de rețea.');
+  }
+};
+
+document.getElementById('modal-exemption').addEventListener('click', function(e) {
+  if (e.target === this) this.style.display = 'none';
+});
+</script>
