@@ -12,13 +12,14 @@ const clubId = user.club_id;
 
 let docs: any[] = [];
 try {
-  const res = await db?.prepare(`
-    SELECT pd.*, p.first_name, p.last_name
-    FROM player_documents pd JOIN players p ON p.id=pd.player_id
-    WHERE pd.club_id=? ORDER BY pd.uploaded_at DESC LIMIT 100
-  `).bind(clubId).all();
-  docs = res?.results ?? [];
-} catch {}
+  docs = await queryAll<any>(db,
+    `SELECT pd.*, p.first_name, p.last_name
+     FROM player_documents pd JOIN players p ON p.id=pd.player_id
+     WHERE pd.club_id=? ORDER BY pd.uploaded_at DESC LIMIT 100`,
+    [clubId]);
+} catch (e) {
+  console.error('Documents load error:', e);
+}
 
 const players = await queryAll<any>(db,
   `SELECT id, first_name || ' ' || last_name AS name FROM players WHERE club_id=? AND is_active=1 ORDER BY last_name`,
