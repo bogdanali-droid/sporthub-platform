@@ -137,17 +137,17 @@ const [sport, teams, coaches] = await Promise.all([
 <script>
   let editingId: string | null = null;
 
-  function openModal() {
+  window.openModal = function() {
     editingId = null;
     (document.getElementById('modal-title') as HTMLElement).textContent = 'Echipă nouă';
     (document.getElementById('team-form') as HTMLFormElement).reset();
     (document.getElementById('modal') as HTMLElement).classList.remove('hidden');
-  }
-  function closeModal() {
+  };
+  window.closeModal = function() {
     (document.getElementById('modal') as HTMLElement).classList.add('hidden');
-  }
+  };
 
-  async function editTeam(id: string) {
+  window.editTeam = async function(id: string) {
     const res = await fetch(`/api/admin/teams/${id}`);
     if (!res.ok) return;
     const t = await res.json();
@@ -161,11 +161,11 @@ const [sport, teams, coaches] = await Promise.all([
     (document.getElementById('modal') as HTMLElement).classList.remove('hidden');
   }
 
-  async function deleteTeam(id: string, name: string) {
+  window.deleteTeam = async function(id: string, name: string) {
     if (!confirm(`Ștergi echipa ${name}?`)) return;
     const res = await fetch(`/api/admin/teams/${id}`, { method: 'DELETE' });
     if (res.ok) location.reload();
-  }
+  };
 
   document.getElementById('team-form')?.addEventListener('submit', async e => {
     e.preventDefault();

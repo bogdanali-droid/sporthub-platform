@@ -136,7 +136,7 @@ const statusLabel: Record<string,string> = { SCHEDULED:'Planificat', COMPLETED:'
 </style>
 
 <script>
-  function filterRows() {
+  window.filterRows = function() {
     const s = (document.getElementById('filter-status') as HTMLSelectElement).value;
     const t = (document.getElementById('filter-team') as HTMLSelectElement).value;
     document.querySelectorAll<HTMLTableRowElement>('#tbody tr').forEach(row => {
@@ -144,11 +144,11 @@ const statusLabel: Record<string,string> = { SCHEDULED:'Planificat', COMPLETED:'
       const matchT = !t || row.dataset.team === t;
       row.style.display = matchS && matchT ? '' : 'none';
     });
-  }
+  };
   let editingId: string | null = null;
-  function openModal() { editingId=null; (document.getElementById('modal-title') as HTMLElement).textContent='Antrenament nou'; (document.getElementById('tr-form') as HTMLFormElement).reset(); (document.getElementById('modal') as HTMLElement).classList.remove('hidden'); }
-  function closeModal() { (document.getElementById('modal') as HTMLElement).classList.add('hidden'); }
-  async function editTraining(id: string) {
+  window.openModal = function() { editingId=null; (document.getElementById('modal-title') as HTMLElement).textContent='Antrenament nou'; (document.getElementById('tr-form') as HTMLFormElement).reset(); (document.getElementById('modal') as HTMLElement).classList.remove('hidden'); };
+  window.closeModal = function() { (document.getElementById('modal') as HTMLElement).classList.add('hidden'); };
+  window.editTraining = async function(id: string) {
     const r = await fetch(`/api/admin/trainings/${id}`); if(!r.ok) return;
     const t = await r.json(); editingId = id;
     (document.getElementById('modal-title') as HTMLElement).textContent='Editează antrenament';
@@ -160,12 +160,12 @@ const statusLabel: Record<string,string> = { SCHEDULED:'Planificat', COMPLETED:'
     (document.getElementById('f-location') as HTMLInputElement).value = t.location??'';
     (document.getElementById('f-notes') as HTMLTextAreaElement).value = t.notes??'';
     (document.getElementById('modal') as HTMLElement).classList.remove('hidden');
-  }
-  async function deleteTraining(id: string) {
+  };
+  window.deleteTraining = async function(id: string) {
     if(!confirm('Anulezi antrenamentul?')) return;
     const r = await fetch(`/api/admin/trainings/${id}`, {method:'DELETE'});
     if(r.ok) location.reload();
-  }
+  };
   document.getElementById('tr-form')?.addEventListener('submit', async e => {
     e.preventDefault();
     const body = {
