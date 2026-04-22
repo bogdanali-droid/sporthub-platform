@@ -1,5 +1,7 @@
 ---
 import type { SessionUser } from '@/lib/auth';
+import PortalTopBar from '@/components/PortalTopBar.astro';
+import { getVisiblePortals } from '@/lib/portals';
 
 interface Props {
   title: string;
@@ -8,6 +10,7 @@ interface Props {
 }
 
 const { title, user, section = 'CCLTC' } = Astro.props;
+const hasPortalBar = user ? getVisiblePortals(user.role).length >= 2 : false;
 
 const navItems = [
   { href: '/federatie-admin', icon: '📊', label: 'Dashboard' },
@@ -164,6 +167,11 @@ const currentPath = Astro.url.pathname;
     .alert-success { background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; }
     .alert-error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
 
+    /* Portal bar offset */
+    body.has-portal-bar { padding-top: 40px; }
+    body.has-portal-bar #sidebar { top: 40px; min-height: calc(100vh - 40px); }
+    body.has-portal-bar #topbar { top: 40px; }
+
     /* Mobile */
     #menu-toggle { display: none; background: none; border: none; font-size: 22px; cursor: pointer; }
     @media (max-width: 900px) {
@@ -174,7 +182,9 @@ const currentPath = Astro.url.pathname;
     }
   </style>
 </head>
-<body>
+<body class={hasPortalBar ? 'has-portal-bar' : ''}>
+
+<PortalTopBar user={user ?? null} />
 
 <aside id="sidebar">
   <div class="sidebar-logo">
@@ -219,9 +229,6 @@ const currentPath = Astro.url.pathname;
   </nav>
 
   <div class="sidebar-footer">
-    {user?.role === 'SUPERADMIN' && (
-      <a href="/portal-select" style="color:#F4B400">🏛️ Schimbă portalul</a>
-    )}
     <a href="/api/auth/logout">🚪 Deconectare</a>
   </div>
 </aside>

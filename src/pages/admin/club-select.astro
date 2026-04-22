@@ -1,0 +1,99 @@
+---
+import type { SessionUser } from '@/lib/auth';
+import { queryAll } from '@/lib/db';
+
+const user = Astro.locals.user as SessionUser | null;
+if (!user) return Astro.redirect('/login');
+if (!['FEDERATION_ADMIN', 'SUPERADMIN'].includes(user.role)) return Astro.redirect('/admin');
+
+const env = (Astro.locals as any).runtime?.env;
+const clubs = await queryAll<{ id: string; name: string; city: string | null; sport_code: string | null }>(
+  env.DB,
+  `SELECT id, name, city, sport_code FROM clubs WHERE is_active = 1 ORDER BY name`,
+  []
+);
+---
+
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Selectare Club — SportHub</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      min-height: 100vh;
+      background: linear-gradient(135deg, #001524 0%, #003049 60%, #001524 100%);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 32px 20px;
+    }
+    .header { text-align: center; margin-bottom: 40px; color: #fff; }
+    .header .logo { font-size: 48px; margin-bottom: 10px; }
+    .header h1 { font-size: 24px; font-weight: 800; }
+    .header p { color: #94a3b8; margin-top: 6px; font-size: 14px; }
+    .clubs-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 14px;
+      max-width: 900px;
+      width: 100%;
+    }
+    .club-btn {
+      background: #fff; border-radius: 12px; padding: 18px 20px;
+      cursor: pointer; border: 2px solid transparent;
+      transition: all .18s; text-align: left;
+      box-shadow: 0 4px 16px rgba(0,0,0,.2);
+      width: 100%;
+    }
+    .club-btn:hover { border-color: #F4B400; transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,.3); }
+    .club-name { font-size: 15px; font-weight: 700; color: #0a1929; margin-bottom: 4px; }
+    .club-meta { font-size: 12px; color: #64748b; display: flex; align-items: center; gap: 8px; }
+    .sport-badge {
+      display: inline-block; padding: 1px 8px; border-radius: 10px;
+      font-size: 10px; font-weight: 700;
+      background: #eff6ff; color: #1d4ed8;
+    }
+    .back-link { color: #64748b; font-size: 13px; text-decoration: none; margin-top: 28px; }
+    .back-link:hover { color: #94a3b8; }
+    .empty { color: #94a3b8; font-size: 15px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="logo">🏟️</div>
+    <h1>Selectează un club</h1>
+    <p>Alege clubul pe care vrei să-l administrezi</p>
+  </div>
+
+  {clubs.length === 0 ? (
+    <p class="empty">Nu există cluburi active în baza de date.</p>
+  ) : (
+    <div class="clubs-grid">
+      {clubs.map(c => (
+        <button class="club-btn" onclick={`selectClub('${c.id}')`}>
+          <div class="club-name">{c.name}</div>
+          <div class="club-meta">
+            {c.city && <span>{c.city}</span>}
+            {c.sport_code && <span class="sport-badge">{c.sport_code}</span>}
+          </div>
+        </button>
+      ))}
+    </div>
+  )}
+
+  <a href="/federatie-admin" class="back-link">← Înapoi la portal federație</a>
+
+  <script>
+    async function selectClub(clubId) {
+      const res = await fetch('/api/auth/set-impersonated-club', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ club_id: clubId }),
+      });
+      if (res.ok) window.location.href = '/admin';
+    }
+  </script>
+</body>
+</html>

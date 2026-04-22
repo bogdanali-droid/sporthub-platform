@@ -1,0 +1,142 @@
+---
+import type { SessionUser } from '@/lib/auth';
+import { queryAll } from '@/lib/db';
+
+const user = Astro.locals.user as SessionUser | null;
+if (!user || user.role !== 'SUPERADMIN') return Astro.redirect('/admin');
+
+const env = (Astro.locals as any).runtime?.env;
+
+const users = await queryAll<{
+  id: string; email: string; first_name: string | null; last_name: string | null;
+  role: string; sport_codes: string | null; is_active: number; club_name: string | null;
+}>(
+  env.DB,
+  `SELECT u.id, u.email, u.first_name, u.last_name, u.role, u.sport_codes, u.is_active,
+          c.name AS club_name
+   FROM users u LEFT JOIN clubs c ON c.id = u.club_id
+   ORDER BY u.role, u.email`,
+  []
+);
+
+const SPORT_CODES = ['BASEBALL5', 'SOFTBALL', 'RUGBY', 'FOTBAL', 'HANDBAL', 'BASCHET', 'VOLEI'];
+---
+
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gestionare Useri — SuperAdmin</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f1f5f9; min-height: 100vh; }
+    .topnav {
+      background: #0a1929; padding: 12px 24px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .topnav-brand { color: #fff; font-size: 16px; font-weight: 700; }
+    .topnav a { color: #64748b; text-decoration: none; font-size: 13px; }
+    .topnav a:hover { color: #94a3b8; }
+    .container { max-width: 1200px; margin: 0 auto; padding: 28px 24px; }
+    h1 { font-size: 22px; font-weight: 700; color: #0f172a; margin-bottom: 20px; }
+    .card { background: #fff; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,.06); overflow: hidden; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { padding: 10px 14px; text-align: left; font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: #64748b; border-bottom: 2px solid #f1f5f9; background: #fafafa; }
+    td { padding: 11px 14px; border-bottom: 1px solid #f8fafc; color: #374151; vertical-align: middle; }
+    tr:hover td { background: #f8fafc; }
+    .role-badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+    .role-SUPERADMIN { background: #fef3c7; color: #92400e; }
+    .role-ADMIN { background: #dbeafe; color: #1d4ed8; }
+    .role-COACH { background: #dcfce7; color: #166534; }
+    .role-PLAYER { background: #ede9fe; color: #5b21b6; }
+    .role-PARENT { background: #fce7f3; color: #9d174d; }
+    .sport-checkboxes { display: flex; flex-wrap: wrap; gap: 6px; }
+    .sport-cb { display: flex; align-items: center; gap: 4px; font-size: 12px; color: #374151; cursor: pointer; }
+    .sport-cb input { cursor: pointer; accent-color: #3b82f6; }
+    .save-btn {
+      background: #3b82f6; color: #fff; border: none; padding: 5px 12px;
+      border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; transition: background .15s;
+    }
+    .save-btn:hover { background: #2563eb; }
+    .save-btn:disabled { background: #93c5fd; cursor: not-allowed; }
+    .saved-msg { font-size: 11px; color: #16a34a; margin-left: 6px; display: none; }
+  </style>
+</head>
+<body>
+  <div class="topnav">
+    <span class="topnav-brand">🏟️ SuperAdmin — Useri</span>
+    <a href="/admin">← Înapoi la Admin</a>
+  </div>
+
+  <div class="container">
+    <h1>Sporturi per User</h1>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>User</th>
+            <th>Rol</th>
+            <th>Club</th>
+            <th>Sporturi accesibile</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {users.map(u => {
+            let codes: string[] = [];
+            try { codes = JSON.parse(u.sport_codes ?? '[]'); } catch {}
+            return (
+              <tr id={`row-${u.id}`}>
+                <td>
+                  <div style="font-weight:600;color:#0f172a">{u.first_name ?? ''} {u.last_name ?? ''}</div>
+                  <div style="font-size:12px;color:#64748b">{u.email}</div>
+                </td>
+                <td><span class={`role-badge role-${u.role}`}>{u.role}</span></td>
+                <td style="color:#64748b;font-size:13px">{u.club_name ?? '—'}</td>
+                <td>
+                  <div class="sport-checkboxes" id={`sports-${u.id}`}>
+                    {SPORT_CODES.map(code => (
+                      <label class="sport-cb">
+                        <input type="checkbox" value={code} checked={codes.includes(code)} data-user={u.id} />
+                        {code}
+                      </label>
+                    ))}
+                  </div>
+                </td>
+                <td style="white-space:nowrap">
+                  <button class="save-btn" onclick={`saveUser('${u.id}')`}>Salvează</button>
+                  <span class="saved-msg" id={`saved-${u.id}`}>✓</span>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    async function saveUser(userId) {
+      const container = document.getElementById('sports-' + userId);
+      const checked = Array.from(container.querySelectorAll('input:checked')).map(cb => cb.value);
+      const btn = document.querySelector('#row-' + userId + ' .save-btn');
+      btn.disabled = true;
+      try {
+        const res = await fetch('/api/superadmin/users/' + userId, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sport_codes: checked }),
+        });
+        if (res.ok) {
+          const msg = document.getElementById('saved-' + userId);
+          msg.style.display = 'inline';
+          setTimeout(() => { msg.style.display = 'none'; }, 2000);
+        }
+      } finally {
+        btn.disabled = false;
+      }
+    }
+  </script>
+</body>
+</html>

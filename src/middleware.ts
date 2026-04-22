@@ -38,7 +38,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
     }
     if (url.pathname.startsWith('/federatie-admin') || url.pathname.startsWith('/asociatie-admin')) {
-      return redirect('/login/federatie');
+      return redirect('/login');
     }
     return redirect('/login');
   }
@@ -52,7 +52,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
       return new Response(JSON.stringify({ error: 'Service unavailable — bindings not configured' }), { status: 503, headers: { 'Content-Type': 'application/json' } });
     }
     if (url.pathname.startsWith('/federatie-admin') || url.pathname.startsWith('/asociatie-admin')) {
-      return redirect('/login/federatie');
+      return redirect('/login');
     }
     return redirect('/login');
   }
@@ -70,13 +70,13 @@ export const onRequest = defineMiddleware(async (context, next) => {
       return new Response(JSON.stringify({ error: 'Session expired' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
     }
     if (url.pathname.startsWith('/federatie-admin') || url.pathname.startsWith('/asociatie-admin')) {
-      return redirect('/login/federatie');
+      return redirect('/login');
     }
     return redirect('/login');
   }
 
   locals.user = session.user;
-  locals.clubId = session.user.club_id;
+  locals.clubId = session.user.impersonated_club_id ?? session.user.club_id;
 
   const { role } = session.user;
   const isApi = url.pathname.startsWith('/api/');
@@ -116,6 +116,13 @@ export const onRequest = defineMiddleware(async (context, next) => {
   // Coach
   if (path.startsWith('/coach') || path.startsWith('/api/coach')) {
     if (!['COACH', 'ADMIN', 'SUPERADMIN'].includes(role)) return forbidden(isApi, '/login');
+  }
+
+  // FEDERATION_ADMIN/SUPERADMIN accessing /admin without a club selected → pick one first
+  if (path.startsWith('/admin') && !path.startsWith('/admin/club-select') && !isApi) {
+    if (['FEDERATION_ADMIN', 'SUPERADMIN'].includes(role) && !session.user.club_id && !session.user.impersonated_club_id) {
+      return redirect('/admin/club-select');
+    }
   }
 
   // Admin — PARENT nu are acces, redirect la /parent

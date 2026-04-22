@@ -1,9 +1,11 @@
 ---
 if (Astro.locals.user) {
-  const r = Astro.locals.user.role;
-  if (r === 'SUPERADMIN') return Astro.redirect('/portal-select');
-  if (r === 'PARENT') return Astro.redirect('/parent');
-  if (r === 'PLAYER') return Astro.redirect('/player');
+  const u = Astro.locals.user;
+  if (!u.sport_code && (u.sport_codes?.length ?? 0) > 1) return Astro.redirect('/sport-select');
+  if (u.role === 'PARENT') return Astro.redirect('/parent');
+  if (u.role === 'PLAYER') return Astro.redirect('/player');
+  if (u.role === 'FEDERATION_ADMIN') return Astro.redirect('/federatie-admin');
+  if (u.role === 'ASSOCIATION_ADMIN') return Astro.redirect('/asociatie-admin');
   return Astro.redirect('/admin');
 }
 
@@ -15,17 +17,25 @@ if (Astro.request.method === 'POST') {
   const env = (Astro.locals as any).runtime?.env;
 
   if (email && password && env) {
-    const { login } = await import('@/lib/auth');
-    const result = await login(env.DB, env.SESSION_KV, email, password, Astro.locals.clientIP);
+    const { login, loginPlatformUser } = await import('@/lib/auth');
+
+    // Try club users first, then platform users (federation/association)
+    let result = await login(env.DB, env.SESSION_KV, email, password, Astro.locals.clientIP);
+    if (!result) {
+      result = await loginPlatformUser(env.DB, env.SESSION_KV, email, password, Astro.locals.clientIP);
+    }
+
     if (result) {
       Astro.cookies.set('session', result.token, {
         path: '/', httpOnly: true, secure: true, sameSite: 'lax',
         maxAge: 7 * 24 * 3600,
       });
-      const role = result.user.role;
-      if (role === 'SUPERADMIN') return Astro.redirect('/portal-select');
+      const { role } = result.user;
+      if (result.needsSportSelect) return Astro.redirect('/sport-select');
       if (role === 'PARENT') return Astro.redirect('/parent');
       if (role === 'PLAYER') return Astro.redirect('/player');
+      if (role === 'FEDERATION_ADMIN') return Astro.redirect('/federatie-admin');
+      if (role === 'ASSOCIATION_ADMIN') return Astro.redirect('/asociatie-admin');
       return Astro.redirect('/admin');
     }
     error = 'Email sau parolă incorectă.';

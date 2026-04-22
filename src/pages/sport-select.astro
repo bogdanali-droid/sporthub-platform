@@ -1,0 +1,134 @@
+---
+import type { SessionUser } from '@/lib/auth';
+
+const user = Astro.locals.user as SessionUser | null;
+if (!user) return Astro.redirect('/login');
+
+// If sport already selected, route to correct portal
+if (user.sport_code) {
+  const role = user.role;
+  if (role === 'FEDERATION_ADMIN') return Astro.redirect('/federatie-admin');
+  if (role === 'ASSOCIATION_ADMIN') return Astro.redirect('/asociatie-admin');
+  if (role === 'PARENT') return Astro.redirect('/parent');
+  if (role === 'PLAYER') return Astro.redirect('/player');
+  return Astro.redirect('/admin');
+}
+
+const sportCodes = user.sport_codes ?? [];
+if (sportCodes.length === 0) return Astro.redirect('/admin');
+// Single sport — just set it and redirect
+if (sportCodes.length === 1) {
+  const env = (Astro.locals as any).runtime?.env;
+  const token = Astro.cookies.get('session')?.value;
+  if (token && env?.SESSION_KV) {
+    const { setActiveSport } = await import('@/lib/auth');
+    await setActiveSport(token, sportCodes[0], env);
+  }
+  return Astro.redirect('/admin');
+}
+
+const SPORT_META: Record<string, { icon: string; name: string; desc: string; color: string; bg: string }> = {
+  BASEBALL5: { icon: '⚾', name: 'Baseball5', desc: '5 jucători · 5 innings · fără pitcher', color: '#1d4ed8', bg: '#eff6ff' },
+  SOFTBALL:  { icon: '🥎', name: 'Softball',  desc: '9 jucători · 7 innings · pitch subarm',  color: '#15803d', bg: '#f0fdf4' },
+  RUGBY:     { icon: '🏉', name: 'Rugby',      desc: '15 jucători · 2 reprize',                color: '#92400e', bg: '#fffbeb' },
+  FOTBAL:    { icon: '⚽', name: 'Fotbal',     desc: '11 jucători · 2 reprize',                color: '#166534', bg: '#f0fdf4' },
+  HANDBAL:   { icon: '🛑', name: 'Handbal',    desc: '7 jucători · 2 reprize',                 color: '#9f1239', bg: '#fff1f2' },
+  BASCHET:   { icon: '🏀', name: 'Baschet',    desc: '5 jucători · 4 sferturi',                color: '#c2410c', bg: '#fff7ed' },
+  VOLEI:     { icon: '🏐', name: 'Volei',      desc: '6 jucători · 5 seturi',                  color: '#1e40af', bg: '#eff6ff' },
+};
+
+const visibleSports = sportCodes.map(code => ({ code, ...(SPORT_META[code] ?? { icon: '🏅', name: code, desc: '', color: '#374151', bg: '#f9fafb' }) }));
+
+const roleLabel: Record<string, string> = {
+  SUPERADMIN: 'Super Admin', ADMIN: 'Admin Club', COACH: 'Antrenor',
+  PLAYER: 'Jucător', PARENT: 'Părinte', FEDERATION_ADMIN: 'Admin Federație', ASSOCIATION_ADMIN: 'Admin Asociație',
+};
+---
+
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Selectare Sport — SportHub</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      min-height: 100vh;
+      background: linear-gradient(135deg, #0a1929 0%, #0f3460 60%, #1a237e 100%);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 32px 20px;
+    }
+    .header { text-align: center; margin-bottom: 48px; color: #fff; }
+    .header .logo { font-size: 52px; margin-bottom: 10px; }
+    .header h1 { font-size: 26px; font-weight: 800; }
+    .header p { color: #94a3b8; margin-top: 6px; font-size: 14px; }
+    .user-chip {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.2);
+      border-radius: 999px; padding: 6px 16px; color: #e2e8f0; font-size: 13px; margin-top: 14px;
+    }
+    .sports { display: flex; flex-wrap: wrap; gap: 20px; justify-content: center; max-width: 700px; width: 100%; }
+    .sport-btn {
+      background: #fff; border-radius: 18px; padding: 28px 32px;
+      text-decoration: none; color: inherit; cursor: pointer;
+      transition: transform .18s, box-shadow .18s;
+      box-shadow: 0 16px 48px rgba(0,0,0,.25);
+      flex: 1; min-width: 220px; max-width: 300px;
+      display: flex; flex-direction: column; align-items: center; text-align: center;
+      border: none; font-family: inherit;
+    }
+    .sport-btn:hover { transform: translateY(-4px); box-shadow: 0 24px 64px rgba(0,0,0,.35); }
+    .sport-icon { font-size: 52px; margin-bottom: 12px; }
+    .sport-name { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+    .sport-desc { font-size: 13px; color: #64748b; }
+    .sport-cta {
+      margin-top: 16px; padding: 8px 20px; border-radius: 8px;
+      font-size: 13px; font-weight: 600;
+    }
+    .logout { color: #94a3b8; font-size: 13px; text-decoration: none; margin-top: 32px; }
+    .logout:hover { color: #e2e8f0; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="logo">🏟️</div>
+    <h1>În ce sport intri?</h1>
+    <p>Alege sportul pentru această sesiune</p>
+    <div class="user-chip">
+      👤 {user.first_name ?? ''} {user.last_name ?? user.email}
+      &nbsp;·&nbsp; <strong>{roleLabel[user.role] ?? user.role}</strong>
+    </div>
+  </div>
+
+  <div class="sports">
+    {visibleSports.map(s => (
+      <button class="sport-btn" onclick={`selectSport('${s.code}')`}>
+        <div class="sport-icon">{s.icon}</div>
+        <div class="sport-name" style={`color:${s.color}`}>{s.name}</div>
+        <div class="sport-desc">{s.desc}</div>
+        <div class="sport-cta" style={`background:${s.bg};color:${s.color}`}>
+          Intră în {s.name} →
+        </div>
+      </button>
+    ))}
+  </div>
+
+  <a href="/api/auth/logout" class="logout">🚪 Deconectare</a>
+
+  <script>
+    async function selectSport(code) {
+      const res = await fetch('/api/auth/set-sport', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sport_code: code }),
+      });
+      if (res.ok) {
+        const { redirect } = await res.json();
+        window.location.href = redirect;
+      }
+    }
+  </script>
+</body>
+</html>

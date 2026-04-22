@@ -5,12 +5,14 @@ export interface SessionUser {
   email: string;
   role: 'SUPERADMIN' | 'ADMIN' | 'COACH' | 'PLAYER' | 'PARENT' | 'VIEWER' | 'FEDERATION_ADMIN' | 'ASSOCIATION_ADMIN';
   club_id: string | null;
-  sport_code: string | null;
+  sport_code: string | null;        // sportul activ curent
+  sport_codes: string[];            // toate sporturile accesibile
   first_name: string | null;
   last_name: string | null;
   avatar_url: string | null;
   federation_id: string | null;
   association_id: string | null;
+  impersonated_club_id: string | null; // club selectat de federation admin
   is_platform_user?: boolean;
 }
 
@@ -35,18 +37,28 @@ async function verifyPbkdf2(password: string, stored: string): Promise<boolean> 
   return newHash === parts[2];
 }
 
+function parseSportCodes(raw: string | null, fallback: string | null): string[] {
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    } catch { /* fall through */ }
+  }
+  return fallback ? [fallback] : [];
+}
+
 export async function login(
   db: D1Database,
   kv: KVNamespace,
   email: string,
   password: string,
   ip: string
-): Promise<{ token: string; user: SessionUser } | null> {
+): Promise<{ token: string; user: SessionUser; needsSportSelect: boolean } | null> {
   const attempts = parseInt(await kv.get(`bf:${ip}`) || '0');
   if (attempts >= 10) return null;
 
   const user = await queryFirst<any>(db,
-    `SELECT u.*, c.sport_code FROM users u
+    `SELECT u.*, c.sport_code AS club_sport_code FROM users u
      LEFT JOIN clubs c ON c.id = u.club_id
      WHERE u.email = ? AND u.is_active = 1`, [email.toLowerCase()]);
 
@@ -63,25 +75,31 @@ export async function login(
 
   await kv.delete(`bf:${ip}`);
 
+  const sportCodes = parseSportCodes(user.sport_codes, user.club_sport_code);
+  const needsSportSelect = sportCodes.length > 1;
+  const activeSport = needsSportSelect ? null : (sportCodes[0] ?? null);
+
   const token = crypto.randomUUID();
   const sessionUser: SessionUser = {
     id: user.id,
     email: user.email,
     role: user.role,
     club_id: user.club_id,
-    sport_code: user.sport_code,
+    sport_code: activeSport,
+    sport_codes: sportCodes,
     first_name: user.first_name,
     last_name: user.last_name,
     avatar_url: user.avatar_url,
     federation_id: null,
     association_id: null,
+    impersonated_club_id: null,
     is_platform_user: false,
   };
 
   await kv.put(`session:${token}`, JSON.stringify(sessionUser), { expirationTtl: SESSION_TTL });
   await execute(db, 'UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?', [user.id]);
 
-  return { token, user: sessionUser };
+  return { token, user: sessionUser, needsSportSelect };
 }
 
 export async function loginPlatformUser(
@@ -90,7 +108,7 @@ export async function loginPlatformUser(
   email: string,
   password: string,
   ip: string
-): Promise<{ token: string; user: SessionUser } | null> {
+): Promise<{ token: string; user: SessionUser; needsSportSelect: boolean } | null> {
   const attempts = parseInt(await kv.get(`bf:${ip}`) || '0');
   if (attempts >= 10) return null;
 
@@ -111,6 +129,8 @@ export async function loginPlatformUser(
 
   await kv.delete(`bf:${ip}`);
 
+  // Platform users (federation/association) get access to both sports by default
+  const sportCodes = ['BASEBALL5', 'SOFTBALL'];
   const token = crypto.randomUUID();
   const sessionUser: SessionUser = {
     id: user.id,
@@ -118,17 +138,19 @@ export async function loginPlatformUser(
     role: user.role as SessionUser['role'],
     club_id: null,
     sport_code: null,
+    sport_codes: sportCodes,
     first_name: user.first_name,
     last_name: user.last_name,
     avatar_url: null,
     federation_id: user.federation_id ?? null,
     association_id: user.association_id ?? null,
+    impersonated_club_id: null,
     is_platform_user: true,
   };
 
   await kv.put(`session:${token}`, JSON.stringify(sessionUser), { expirationTtl: SESSION_TTL });
 
-  return { token, user: sessionUser };
+  return { token, user: sessionUser, needsSportSelect: true };
 }
 
 export async function getSession(
@@ -138,10 +160,38 @@ export async function getSession(
   const raw = await env.SESSION_KV.get(`session:${token}`);
   if (!raw) return null;
   try {
-    return { user: JSON.parse(raw) as SessionUser };
+    const user = JSON.parse(raw) as SessionUser;
+    // Backfill missing fields for old sessions
+    if (!user.sport_codes) user.sport_codes = user.sport_code ? [user.sport_code] : [];
+    if (user.impersonated_club_id === undefined) user.impersonated_club_id = null;
+    return { user };
   } catch {
     return null;
   }
+}
+
+export async function setActiveSport(
+  token: string,
+  sportCode: string,
+  env: { SESSION_KV: KVNamespace }
+): Promise<void> {
+  const raw = await env.SESSION_KV.get(`session:${token}`);
+  if (!raw) return;
+  const user = JSON.parse(raw) as SessionUser;
+  user.sport_code = sportCode;
+  await env.SESSION_KV.put(`session:${token}`, JSON.stringify(user), { expirationTtl: SESSION_TTL });
+}
+
+export async function setImpersonatedClub(
+  token: string,
+  clubId: string | null,
+  env: { SESSION_KV: KVNamespace }
+): Promise<void> {
+  const raw = await env.SESSION_KV.get(`session:${token}`);
+  if (!raw) return;
+  const user = JSON.parse(raw) as SessionUser;
+  user.impersonated_club_id = clubId;
+  await env.SESSION_KV.put(`session:${token}`, JSON.stringify(user), { expirationTtl: SESSION_TTL });
 }
 
 export async function refreshSession(token: string, env: { SESSION_KV: KVNamespace }): Promise<void> {

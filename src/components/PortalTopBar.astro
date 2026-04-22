@@ -1,0 +1,86 @@
+---
+import type { SessionUser } from '@/lib/auth';
+import { getVisiblePortals, getCurrentPortalId } from '@/lib/portals';
+
+interface Props {
+  user: SessionUser | null;
+  currentPortal?: string;
+}
+
+const { user, currentPortal } = Astro.props;
+if (!user) return;
+
+const portals = getVisiblePortals(user.role);
+if (portals.length < 2) return; // Nu afișa bara dacă userul are acces la un singur portal
+
+const activePage = currentPortal ?? getCurrentPortalId(Astro.url.pathname);
+
+// For club portal: use impersonated_club_id if available, otherwise /admin/club-select
+function getClubHref(portal: typeof portals[0]): string {
+  if (portal.id !== 'club') return portal.href;
+  if (user.club_id || user.impersonated_club_id) return '/admin';
+  return '/admin/club-select';
+}
+
+const sportIcon = user.sport_code === 'SOFTBALL' ? '🥎' : user.sport_code === 'BASEBALL5' ? '⚾' : null;
+---
+
+<div class="portal-topbar">
+  <div class="portal-topbar-inner">
+    <div class="portal-pills">
+      {portals.map(p => (
+        <a
+          href={getClubHref(p)}
+          class={`portal-pill${activePage === p.id ? ' active' : ''}`}
+          style={activePage === p.id ? `--pill-color:${p.color}` : ''}
+        >
+          <span>{p.icon}</span>
+          <span>{p.label}</span>
+        </a>
+      ))}
+    </div>
+
+    <div class="portal-topbar-right">
+      {sportIcon && (
+        <a href="/sport-select" class="sport-chip" title="Schimbă sportul">
+          {sportIcon} {user.sport_code}
+        </a>
+      )}
+    </div>
+  </div>
+</div>
+
+<style>
+  .portal-topbar {
+    background: #0f172a;
+    border-bottom: 1px solid rgba(255,255,255,.08);
+    padding: 0 16px;
+    position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+    height: 40px;
+  }
+  .portal-topbar-inner {
+    display: flex; align-items: center; justify-content: space-between;
+    height: 40px; max-width: 100%;
+  }
+  .portal-pills { display: flex; gap: 4px; }
+  .portal-pill {
+    display: flex; align-items: center; gap: 5px;
+    padding: 4px 12px; border-radius: 6px;
+    font-size: 12px; font-weight: 500; color: #94a3b8;
+    text-decoration: none; transition: background .15s, color .15s;
+  }
+  .portal-pill:hover { background: rgba(255,255,255,.07); color: #e2e8f0; }
+  .portal-pill.active {
+    background: rgba(255,255,255,.1);
+    color: var(--pill-color, #fff);
+    font-weight: 600;
+  }
+  .portal-topbar-right { display: flex; align-items: center; gap: 8px; }
+  .sport-chip {
+    font-size: 11px; font-weight: 600; color: #64748b;
+    padding: 3px 10px; border-radius: 999px;
+    border: 1px solid rgba(255,255,255,.1);
+    text-decoration: none; transition: color .15s;
+  }
+  .sport-chip:hover { color: #e2e8f0; }
+</style>
