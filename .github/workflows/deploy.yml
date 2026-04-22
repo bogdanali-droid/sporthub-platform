@@ -47,6 +47,8 @@ jobs:
           npx wrangler d1 execute sporthub-db --remote --file=db/migrations/010_demo_repopulate.sql || true
           npx wrangler d1 execute sporthub-db --remote --file=db/migrations/011_softball_demo.sql || true
           npx wrangler d1 execute sporthub-db --remote --file=db/migrations/012_schema_fixes.sql || true
+          npx wrangler d1 execute sporthub-db --remote --file=db/migrations/013_baseball5_schema.sql || true
+          npx wrangler d1 execute sporthub-db --remote --file=db/migrations/014_match_selections_physical.sql || true
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/pages-action@v1
