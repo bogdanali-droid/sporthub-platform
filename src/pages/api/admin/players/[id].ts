@@ -3,6 +3,30 @@ import { queryFirst, execute } from '@/lib/db';
 
 export const prerender = false;
 
+export async function GET({ params, locals }: APIContext) {
+  const db = (locals as any).runtime?.env?.DB;
+  const { id } = params;
+  const clubId = (locals as any).clubId;
+
+  if (!clubId) return new Response('Unauthorized', { status: 401 });
+
+  const player = await queryFirst<any>(db,
+    `SELECT * FROM players WHERE id = ? AND club_id = ?`,
+    [id, clubId]
+  );
+
+  if (!player) return new Response('Not found', { status: 404 });
+
+  const teamAssignment = await queryFirst<any>(db,
+    `SELECT team_id FROM team_players WHERE player_id = ? AND left_at IS NULL`,
+    [id]
+  );
+
+  return new Response(JSON.stringify({ ...player, team_id: teamAssignment?.team_id ?? null }), {
+    headers: { 'Content-Type': 'application/json' }
+  });
+}
+
 export async function PUT({ params, request, locals }: APIContext) {
   const session = { user: locals.user, clubId: locals.user?.club_id };
   if (!session) return new Response('Unauthorized', { status: 401 });
