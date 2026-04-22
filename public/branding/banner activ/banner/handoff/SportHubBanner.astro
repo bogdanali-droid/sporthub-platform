@@ -1,0 +1,380 @@
+---
+// SportHubBanner.astro — drop-in Astro component pentru landing page SportHub
+// Usage: <SportHubBanner /> sau <SportHubBanner speed={5} href="/login" />
+//
+// Props (toate opționale):
+//   speed     — secunde per slide (default 4)
+//   href      — destinație click (default login-ul platformei)
+//   sports    — listă custom de sporturi
+
+export interface Sport {
+  id: string;
+  name: string;
+  emoji: string;
+  tag: string;
+  accent: string;
+  stat: string;
+  cta: string;
+  bg: string;
+  pattern: string;
+}
+
+export interface Props {
+  speed?: number;
+  href?: string;
+  sports?: Sport[];
+}
+
+const DEFAULT_SPORTS: Sport[] = [
+  {
+    id: 'baseball5', name: 'BASEBALL5', emoji: '⚾',
+    tag: '5 jucători · 5 innings · fără pitcher',
+    accent: '#f97316', stat: '48 echipe active', cta: 'Intră în platformă',
+    bg: 'linear-gradient(135deg,#0b1f3a 0%,#1e40af 55%,#f97316 100%)',
+    pattern: 'radial-gradient(circle at 20% 30%, rgba(249,115,22,0.35), transparent 45%), radial-gradient(circle at 80% 70%, rgba(59,130,246,0.45), transparent 50%)',
+  },
+  {
+    id: 'softball', name: 'SOFTBALL', emoji: '🥎',
+    tag: '9 jucători · 7 innings · pitch subarm',
+    accent: '#facc15', stat: '124 meciuri în acest sezon', cta: 'Vezi clasamentul',
+    bg: 'linear-gradient(135deg,#052e2b 0%,#065f46 55%,#facc15 100%)',
+    pattern: 'radial-gradient(circle at 15% 40%, rgba(250,204,21,0.35), transparent 45%), radial-gradient(circle at 85% 60%, rgba(16,185,129,0.4), transparent 50%)',
+  },
+  {
+    id: 'rugby', name: 'RUGBY', emoji: '🏉',
+    tag: '15 jucători · 80 minute · contact total',
+    accent: '#22c55e', stat: 'Liga Națională live', cta: 'Urmărește meciurile',
+    bg: 'linear-gradient(135deg,#1a1a1a 0%,#14532d 55%,#22c55e 100%)',
+    pattern: 'radial-gradient(circle at 25% 50%, rgba(34,197,94,0.4), transparent 45%), radial-gradient(circle at 80% 30%, rgba(255,255,255,0.12), transparent 45%)',
+  },
+  {
+    id: 'basket', name: 'BASCHET', emoji: '🏀',
+    tag: '5 jucători · 4 sferturi · tempo alert',
+    accent: '#fb923c', stat: 'Live scoring în timp real', cta: 'Deschide scoreboard',
+    bg: 'linear-gradient(135deg,#1a0b2e 0%,#7c2d12 55%,#fb923c 100%)',
+    pattern: 'radial-gradient(circle at 30% 35%, rgba(251,146,60,0.4), transparent 45%), radial-gradient(circle at 75% 65%, rgba(168,85,247,0.35), transparent 50%)',
+  },
+  {
+    id: 'handbal', name: 'HANDBAL', emoji: '🤾',
+    tag: '7 jucători · 60 minute · viteză pură',
+    accent: '#ef4444', stat: 'Evaluări & statistici', cta: 'Vezi jucătorii',
+    bg: 'linear-gradient(135deg,#1e3a8a 0%,#7f1d1d 55%,#ef4444 100%)',
+    pattern: 'radial-gradient(circle at 20% 60%, rgba(239,68,68,0.4), transparent 45%), radial-gradient(circle at 80% 40%, rgba(59,130,246,0.35), transparent 50%)',
+  },
+];
+
+const {
+  speed = 4,
+  href = 'https://sporthub-platform.pages.dev/login',
+  sports = DEFAULT_SPORTS,
+} = Astro.props;
+
+const first = sports[0];
+const sportsJson = JSON.stringify(sports);
+---
+
+<a
+  class="sh-banner"
+  href={href}
+  aria-label="Intră în platforma SportHub"
+  data-sh-banner
+  data-sh-speed={speed * 1000}
+  style={`--sh-bg:${first.bg};--sh-pattern:${first.pattern};--sh-accent:${first.accent}`}
+>
+  <div class="sh-banner__bg" aria-hidden="true"></div>
+  <div class="sh-banner__stripes" aria-hidden="true"></div>
+  <div class="sh-banner__wedge" aria-hidden="true"></div>
+  <div class="sh-banner__emoji" aria-hidden="true" data-sh-emoji>{first.emoji}</div>
+
+  <div class="sh-banner__brand">
+    <span class="sh-banner__logo">S</span>
+    SPORTHUB<span class="sh-banner__tld">.ro</span>
+  </div>
+
+  <div class="sh-banner__pill">Platforma oficială FRBS</div>
+
+  <div class="sh-banner__content" data-sh-content>
+    <div class="sh-banner__stat">
+      <span class="sh-banner__dot"></span>
+      <span data-sh-stat>{first.stat}</span>
+    </div>
+    <div class="sh-banner__name" data-sh-name>{first.name}</div>
+    <div class="sh-banner__tag" data-sh-tag>{first.tag}</div>
+    <div class="sh-banner__cta">
+      ⚡ <span data-sh-cta>{first.cta}</span>
+      <span class="sh-banner__arrow">→</span>
+    </div>
+  </div>
+
+  <div class="sh-banner__dots" data-sh-dots>
+    {sports.map((_, i) => (
+      <button type="button" data-sh-dot={i} class={i === 0 ? 'active' : ''} aria-label={`Slide ${i + 1}`}></button>
+    ))}
+  </div>
+
+  <script type="application/json" data-sh-data set:html={sportsJson}></script>
+</a>
+
+<script>
+  // Self-contained, runs on client. Hydrates every banner instance on the page.
+  document.querySelectorAll<HTMLAnchorElement>('[data-sh-banner]').forEach((banner) => {
+    const dataEl = banner.querySelector<HTMLScriptElement>('[data-sh-data]');
+    if (!dataEl) return;
+    const sports = JSON.parse(dataEl.textContent || '[]');
+    if (!sports.length) return;
+
+    const speed = Number(banner.dataset.shSpeed) || 4000;
+    const nameEl = banner.querySelector<HTMLElement>('[data-sh-name]')!;
+    const tagEl = banner.querySelector<HTMLElement>('[data-sh-tag]')!;
+    const statEl = banner.querySelector<HTMLElement>('[data-sh-stat]')!;
+    const ctaEl = banner.querySelector<HTMLElement>('[data-sh-cta]')!;
+    const emojiEl = banner.querySelector<HTMLElement>('[data-sh-emoji]')!;
+    const contentEl = banner.querySelector<HTMLElement>('[data-sh-content]')!;
+    const dotEls = banner.querySelectorAll<HTMLButtonElement>('[data-sh-dot]');
+
+    let idx = 0;
+    let paused = false;
+    let timer: ReturnType<typeof setInterval> | null = null;
+
+    function render(i: number) {
+      const s = sports[i];
+      banner.style.setProperty('--sh-bg', s.bg);
+      banner.style.setProperty('--sh-pattern', s.pattern);
+      banner.style.setProperty('--sh-accent', s.accent);
+      nameEl.textContent = s.name;
+      tagEl.textContent = s.tag;
+      statEl.textContent = s.stat;
+      ctaEl.textContent = s.cta;
+      emojiEl.textContent = s.emoji;
+      dotEls.forEach((d, j) => d.classList.toggle('active', j === i));
+      contentEl.classList.remove('sh-animate');
+      void contentEl.offsetWidth;
+      contentEl.classList.add('sh-animate');
+    }
+
+    function go(i: number) { idx = (i + sports.length) % sports.length; render(idx); }
+    function next() { if (!paused) go(idx + 1); }
+    function start() { timer = setInterval(next, speed); }
+    function stop() { if (timer) clearInterval(timer); }
+
+    banner.addEventListener('mouseenter', () => { paused = true; });
+    banner.addEventListener('mouseleave', () => { paused = false; });
+
+    dotEls.forEach((d) => {
+      d.addEventListener('click', (e) => {
+        e.preventDefault();
+        go(Number(d.dataset.shDot));
+        stop(); start();
+      });
+    });
+
+    // Pause when offscreen (saves battery)
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) { if (!timer) start(); }
+        else { stop(); timer = null; }
+      });
+    }, { threshold: 0.1 });
+    io.observe(banner);
+  });
+</script>
+
+<style>
+  .sh-banner {
+    position: relative;
+    display: block;
+    width: 100%;
+    max-width: 1200px;
+    aspect-ratio: 3 / 1;
+    margin: 0 auto;
+    overflow: hidden;
+    border-radius: 12px;
+    text-decoration: none;
+    color: white;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    box-shadow: 0 20px 60px -15px rgba(0, 0, 0, 0.5);
+    isolation: isolate;
+  }
+
+  .sh-banner__bg {
+    position: absolute;
+    inset: 0;
+    background: var(--sh-bg);
+    transition: background 800ms ease;
+    animation: sh-kenburns 6s ease-in-out infinite alternate;
+  }
+  .sh-banner__bg::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--sh-pattern);
+    transition: background 800ms ease;
+  }
+
+  .sh-banner__stripes {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(115deg, transparent 0 80px, rgba(255, 255, 255, 0.03) 80px 82px);
+  }
+
+  .sh-banner__wedge {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 43%;
+    height: 100%;
+    background: var(--sh-accent);
+    opacity: 0.18;
+    clip-path: polygon(35% 0, 100% 0, 100% 100%, 0 100%);
+    transition: background 600ms ease;
+  }
+
+  .sh-banner__emoji {
+    position: absolute;
+    right: -3%;
+    top: 50%;
+    transform: translateY(-50%) rotate(-8deg);
+    font-size: clamp(140px, 30vw, 360px);
+    line-height: 1;
+    filter: drop-shadow(0 20px 40px rgba(0, 0, 0, 0.4));
+    animation: sh-float 6s ease-in-out infinite;
+  }
+
+  .sh-banner__brand {
+    position: absolute;
+    top: 7%;
+    left: 3%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 800;
+    font-size: clamp(12px, 1.5vw, 18px);
+    letter-spacing: 0.5px;
+  }
+  .sh-banner__logo {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: white;
+    color: #0b1f3a;
+    display: grid;
+    place-items: center;
+    font-weight: 900;
+    font-size: 18px;
+  }
+  .sh-banner__tld { opacity: 0.6; font-weight: 500; }
+
+  .sh-banner__pill {
+    position: absolute;
+    top: 8%;
+    right: 3%;
+    padding: 6px 14px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.15);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    font-size: clamp(9px, 0.9vw, 11px);
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+  }
+
+  .sh-banner__content {
+    position: absolute;
+    left: 4.5%;
+    bottom: 12%;
+    right: 4.5%;
+    animation: sh-slideup 600ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  .sh-banner__content.sh-animate { animation: sh-slideup 600ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+
+  .sh-banner__stat {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-radius: 6px;
+    background: var(--sh-accent);
+    color: #0b1f3a;
+    font-size: clamp(9px, 0.9vw, 11px);
+    font-weight: 800;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 14px;
+    transition: background 500ms ease;
+  }
+  .sh-banner__dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    background: #0b1f3a;
+    animation: sh-pulse 1.5s infinite;
+  }
+  .sh-banner__name {
+    font-size: clamp(40px, 7.5vw, 88px);
+    font-weight: 900;
+    line-height: 0.95;
+    letter-spacing: -2px;
+    margin-bottom: 10px;
+    text-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+    font-style: italic;
+  }
+  .sh-banner__tag {
+    font-size: clamp(13px, 1.5vw, 18px);
+    opacity: 0.92;
+    font-weight: 500;
+    margin-bottom: 20px;
+  }
+  .sh-banner__cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 22px;
+    border-radius: 8px;
+    background: white;
+    color: #0b1f3a;
+    font-size: clamp(13px, 1.25vw, 15px);
+    font-weight: 800;
+    letter-spacing: 0.3px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  }
+  .sh-banner__arrow { transition: transform 300ms ease; display: inline-block; }
+  .sh-banner:hover .sh-banner__arrow { transform: translateX(4px); }
+
+  .sh-banner__dots {
+    position: absolute;
+    bottom: 5%;
+    right: 4.5%;
+    display: flex;
+    gap: 8px;
+    z-index: 3;
+  }
+  .sh-banner__dots button {
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.4);
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    transition: width 400ms, background 400ms;
+  }
+  .sh-banner__dots button.active {
+    width: 28px;
+    background: white;
+  }
+
+  @keyframes sh-kenburns { from { transform: scale(1); } to { transform: scale(1.08); } }
+  @keyframes sh-float { 0%, 100% { transform: translateY(-50%) rotate(-8deg); } 50% { transform: translateY(-54%) rotate(-6deg); } }
+  @keyframes sh-slideup { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes sh-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(1.3); } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .sh-banner *, .sh-banner *::before, .sh-banner *::after {
+      animation: none !important;
+      transition: none !important;
+    }
+  }
+</style>
