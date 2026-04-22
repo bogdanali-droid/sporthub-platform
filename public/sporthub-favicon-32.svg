@@ -1,0 +1,26 @@
+<svg width="32" height="40" viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg">
+  <!-- Shield -->
+  <path d="M 50 5 L 90 22 L 90 58 Q 90 92, 50 115 Q 10 92, 10 58 L 10 22 Z" 
+        fill="#1976C2"/>
+  
+  <!-- Bottom chevron - thicker for small size -->
+  <path d="M 30 68 L 50 54 L 70 68" 
+        stroke="#FF7849" 
+        stroke-width="8" 
+        fill="none" 
+        stroke-linecap="round"/>
+  
+  <!-- Middle chevron -->
+  <path d="M 33 56 L 50 44 L 67 56" 
+        stroke="#FF9270" 
+        stroke-width="8" 
+        fill="none" 
+        stroke-linecap="round"/>
+  
+  <!-- Top chevron -->
+  <path d="M 36 44 L 50 34 L 64 44" 
+        stroke="white" 
+        stroke-width="8" 
+        fill="none" 
+        stroke-linecap="round"/>
+</svg>
