@@ -1,0 +1,28 @@
+---
+export const prerender = false;
+import AdminLayout from '../../../../layouts/AdminLayout.astro';
+const { id } = Astro.params;
+const match = await (Astro.locals as any).runtime?.env?.DB?.prepare('SELECT * FROM matches WHERE id = ? AND club_id = ?').bind(id, (Astro.locals as any).clubId).first();
+if (!match) return Astro.redirect('/admin/matches');
+---
+<AdminLayout title="Video meci">
+  <a href={`/admin/matches/${id}/live`} style="color:#6b7280;font-size:14px;text-decoration:none;display:inline-flex;align-items:center;gap:6px;margin-bottom:20px">← Înapoi</a>
+  <div class="card">
+    <h2 style="font-size:16px;font-weight:700;margin-bottom:24px;color:#1e293b">Atașează video</h2>
+    <div style="display:grid;gap:16px">
+      <div class="form-group">
+        <label class="form-label">YouTube URL</label>
+        <input type="url" class="form-input" placeholder="https://youtube.com/watch?v=..." />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Veo Share URL</label>
+        <input type="url" class="form-input" placeholder="https://veo.co/..." />
+      </div>
+      <div class="form-group">
+        <label class="form-label">XBotGo URL</label>
+        <input type="url" class="form-input" placeholder="https://xbotgo.com/..." />
+      </div>
+    </div>
+    <button class="btn btn-primary" style="width:100%;margin-top:16px">Salvează linkuri</button>
+  </div>
+</AdminLayout>

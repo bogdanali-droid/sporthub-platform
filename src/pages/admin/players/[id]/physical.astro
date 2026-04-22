@@ -1,0 +1,31 @@
+---
+export const prerender = false;
+import AdminLayout from '../../../../layouts/AdminLayout.astro';
+import { queryAll } from '@/lib/db';
+
+const { id } = Astro.params;
+const player = await (Astro.locals as any).runtime?.env?.DB?.prepare('SELECT * FROM players WHERE id = ? AND club_id = ?').bind(id, (Astro.locals as any).clubId).first();
+if (!player) return Astro.redirect('/admin/players');
+
+const tests = await queryAll<any>((Astro.locals as any).runtime?.env?.DB, 'SELECT * FROM physical_tests WHERE player_id = ? ORDER BY test_date DESC LIMIT 10', [id]);
+---
+
+<AdminLayout title={`Teste fizice - ${player.first_name} ${player.last_name}`}>
+  <a href={`/admin/players/${id}`} style="color:#6b7280;font-size:14px;text-decoration:none;display:inline-flex;align-items:center;gap:6px;margin-bottom:20px">← Înapoi</a>
+  
+  <div class="card">
+    <h2 style="font-size:16px;font-weight:700;margin-bottom:24px;color:#1e293b">Teste fizice</h2>
+    {tests.length === 0 ? (
+      <p style="color:#94a3b8;text-align:center;padding:32px">Niciun test înregistrat</p>
+    ) : (
+      <table class="table">
+        <thead>
+          <tr><th>Test</th><th>Rezultat</th><th>Data</th></tr>
+        </thead>
+        <tbody>
+          {tests.map((t: any) => <tr><td>{t.test_type}</td><td>{t.result}</td><td>{t.test_date}</td></tr>)}
+        </tbody>
+      </table>
+    )}
+  </div>
+</AdminLayout>

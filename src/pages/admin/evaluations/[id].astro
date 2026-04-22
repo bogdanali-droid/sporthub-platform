@@ -1,0 +1,63 @@
+---
+export const prerender = false;
+import AdminLayout from '../../../layouts/AdminLayout.astro';
+import { queryAll } from '@/lib/db';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const db = (Astro.locals as any).runtime?.env?.DB;
+const clubId = (Astro.locals as any).clubId;
+const { id } = Astro.params;
+
+const player = await db?.prepare('SELECT * FROM players WHERE id = ? AND club_id = ?').bind(id, clubId).first();
+if (!player) return Astro.redirect('/admin/evaluations');
+
+const scores = await queryAll<any>(db, `
+  SELECT pes.*, sea.name_ro, sea.scale_min, sea.scale_max
+  FROM player_evaluation_scores pes
+  LEFT JOIN sport_evaluation_attributes sea ON pes.eval_attr = sea.code
+  WHERE pes.player_id = ?
+  ORDER BY pes.created_at DESC
+`, [id]);
+
+const avgScore = scores.length > 0 
+  ? Math.round(scores.reduce((sum: number, s: any) => sum + (s.score || 0), 0) / scores.length)
+  : 0;
+---
+
+<AdminLayout title={`Evaluări - ${player.first_name} ${player.last_name}`}>
+  <a href="/admin/evaluations" style="color:#6b7280;font-size:14px;text-decoration:none;display:inline-flex;align-items:center;gap:6px;margin-bottom:20px">← Înapoi</a>
+
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:24px">
+      <div>
+        <h2 style="font-size:18px;font-weight:700;color:#1e293b">{player.first_name} {player.last_name}</h2>
+        <div style="font-size:14px;color:#6b7280;margin-top:4px">#{player.jersey_number || '?'}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:28px;font-weight:700;color:#1976C2">{avgScore}</div>
+        <div style="font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em">Medie</div>
+      </div>
+    </div>
+
+    {scores.length === 0 ? (
+      <div style="text-align:center;padding:32px;color:#94a3b8">
+        <div style="font-size:40px;margin-bottom:12px">⭐</div>
+        <p>Nicio evaluare încă.</p>
+      </div>
+    ) : (
+      <div style="display:grid;gap:12px">
+        {scores.map((s: any) => (
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:12px;background:#f8fafc;border-radius:8px">
+            <div>
+              <div style="font-weight:500;color:#1e293b">{s.name_ro}</div>
+              <div style="font-size:12px;color:#6b7280">{new Date(s.created_at).toLocaleDateString('ro-RO')}</div>
+            </div>
+            <div style="font-size:20px;font-weight:700;color:#1976C2">{s.score}/{s.scale_max || 10}</div>
+          </div>
+        ))}
+      </div>
+    )}
+  </div>
+</AdminLayout>

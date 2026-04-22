@@ -1,0 +1,55 @@
+---
+export const prerender = false;
+import AdminLayout from '../../../../layouts/AdminLayout.astro';
+import { queryAll } from '@/lib/db';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const db = (Astro.locals as any).runtime?.env?.DB;
+const clubId = (Astro.locals as any).clubId;
+const { id } = Astro.params;
+
+const player = await db?.prepare('SELECT * FROM players WHERE id = ? AND club_id = ?').bind(id, clubId).first();
+if (!player) return Astro.redirect('/admin/players');
+
+const scores = await queryAll<any>(db, `
+  SELECT * FROM player_evaluation_scores 
+  WHERE player_id = ? 
+  ORDER BY created_at DESC LIMIT 20
+`, [id]);
+---
+
+<AdminLayout title={`Evaluări - ${player.first_name} ${player.last_name}`}>
+  <a href={`/admin/players/${id}`} style="color:#6b7280;font-size:14px;text-decoration:none;display:inline-flex;align-items:center;gap:6px;margin-bottom:20px">← Înapoi la jucător</a>
+
+  <div class="card">
+    <h2 style="font-size:16px;font-weight:700;margin-bottom:24px;color:#1e293b">Evaluări reușite</h2>
+    {scores.length === 0 ? (
+      <div style="text-align:center;padding:32px;color:#94a3b8">
+        <p>Nicio evaluare încă.</p>
+      </div>
+    ) : (
+      <div style="overflow-x:auto">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Atribut</th>
+              <th>Scor</th>
+              <th>Data</th>
+            </tr>
+          </thead>
+          <tbody>
+            {scores.map((s: any) => (
+              <tr>
+                <td>{s.eval_attr}</td>
+                <td>{s.score}</td>
+                <td>{new Date(s.created_at).toLocaleDateString('ro-RO')}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+  </div>
+</AdminLayout>

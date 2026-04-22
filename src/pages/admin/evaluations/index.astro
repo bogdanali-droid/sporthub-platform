@@ -1,125 +1,75 @@
 ---
-import AdminLayout from '@/layouts/AdminLayout.astro';
-if (!Astro.locals.user) return Astro.redirect('/login');
+export const prerender = false;
+import AdminLayout from '../../../layouts/AdminLayout.astro';
+import { queryAll } from '@/lib/db';
 
 const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
 const db = (Astro.locals as any).runtime?.env?.DB;
+const clubId = (Astro.locals as any).clubId;
 
-import { queryAll } from '@/lib/db';
-import { getClubSportConfig } from '@/lib/sport-config';
-
-const sport = await getClubSportConfig(db, user.club_id!);
-
-// Aggregate in-match eval scores per player and attribute
-const matchEvals = await queryAll<any>(db,
-  `SELECT mes.player_id, p.first_name || ' ' || p.last_name AS player_name,
-     mes.eval_attr, ROUND(AVG(mes.score),1) AS avg_score, COUNT(*) AS cnt
-   FROM match_eval_scores mes
-   JOIN players p ON p.id = mes.player_id
-   JOIN matches m ON m.id = mes.match_id
-   WHERE m.club_id = ?
-   GROUP BY mes.player_id, mes.eval_attr
-   ORDER BY p.last_name, mes.eval_attr`, [user.club_id]);
+const evaluations = await queryAll<any>(db, `
+  SELECT pes.*, p.first_name, p.last_name, p.jersey_number,
+         t.name as team_name, sea.name_ro as attribute_name
+  FROM player_evaluation_scores pes
+  JOIN players p ON pes.player_id = p.id
+  LEFT JOIN team_players tp ON p.id = tp.player_id AND tp.left_at IS NULL
+  LEFT JOIN teams t ON tp.team_id = t.id
+  LEFT JOIN sport_evaluation_attributes sea ON pes.eval_attr = sea.code
+  WHERE p.club_id = ?
+  ORDER BY p.last_name, p.first_name, pes.created_at DESC
+`, [clubId]);
 
 // Group by player
-const byPlayer: Record<string, { name: string; attrs: Record<string, { avg: number; cnt: number }> }> = {};
-for (const row of matchEvals) {
-  if (!byPlayer[row.player_id]) byPlayer[row.player_id] = { name: row.player_name, attrs: {} };
-  byPlayer[row.player_id].attrs[row.eval_attr] = { avg: row.avg_score, cnt: row.cnt };
-}
+const grouped: any = {};
+evaluations.forEach((e: any) => {
+  const key = e.player_id;
+  if (!grouped[key]) {
+    grouped[key] = {
+      player_id: e.player_id,
+      first_name: e.first_name,
+      last_name: e.last_name,
+      jersey_number: e.jersey_number,
+      team_name: e.team_name,
+      scores: []
+    };
+  }
+  grouped[key].scores.push(e);
+});
 
-const evalAttrs = sport?.evaluationAttributes ?? [];
-const players = Object.entries(byPlayer);
-
-const attrLabel: Record<string, string> = {};
-for (const a of evalAttrs) attrLabel[a.code] = a.name_ro;
+const players = Object.values(grouped);
 ---
 
-<AdminLayout title="Evaluări Jucători" user={user} sportCode={sport?.code} sportIcon={sport?.icon}>
-
-  <div class="page-header">
-    <div>
-      <h1 class="page-title">Evaluări Jucători</h1>
-      <p class="page-sub">Note acordate în timpul meciurilor live</p>
-    </div>
+<AdminLayout title="Evaluări jucători">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+    <h2 style="font-size:18px;font-weight:700;color:#1e293b">Evaluări jucători</h2>
   </div>
 
   {players.length === 0 ? (
-    <div class="empty-state">
-      <div class="empty-icon">⭐</div>
-      <h3>Nicio evaluare înregistrată</h3>
-      <p>Evaluările se acordă în pagina Live Scoring a unui meci.</p>
-      <a href="/admin/matches" class="btn-primary">Mergi la Meciuri</a>
+    <div class="card" style="text-align:center;padding:40px;color:#94a3b8">
+      <div style="font-size:48px;margin-bottom:16px">📊</div>
+      <p>Nicio evaluare încă. Adaugă evaluări jucătorilor din pagina meciurilor.</p>
     </div>
   ) : (
-    <div class="card">
-      <div class="table-wrap">
-        <table class="table">
-          <thead>
-            <tr>
-              <th>Jucător</th>
-              {evalAttrs.slice(0,6).map(a => <th title={a.name_ro}>{a.name_ro.split(' ').slice(0,2).join(' ')}</th>)}
-              <th>Media</th>
-            </tr>
-          </thead>
-          <tbody>
-            {players.map(([pid, data]) => {
-              const scores = evalAttrs.map(a => data.attrs[a.code]?.avg ?? null);
-              const validScores = scores.filter(s => s !== null) as number[];
-              const overall = validScores.length > 0
-                ? (validScores.reduce((a, b) => a + b, 0) / validScores.length).toFixed(1)
-                : '—';
-              return (
-                <tr>
-                  <td class="player-name">{data.name}</td>
-                  {evalAttrs.slice(0,6).map(a => {
-                    const val = data.attrs[a.code];
-                    return (
-                      <td class="score-cell">
-                        {val ? (
-                          <span class={`score-badge score-${Math.round(val.avg)}`}>
-                            {val.avg} <small>({val.cnt}x)</small>
-                          </span>
-                        ) : (
-                          <span class="score-na">—</span>
-                        )}
-                      </td>
-                    );
-                  })}
-                  <td class="overall-score">{overall}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+    <div style="display:grid;gap:12px">
+      {players.map((p: any) => (
+        <a href={`/admin/evaluations/${p.player_id}`} style="text-decoration:none">
+          <div class="card" style="cursor:pointer;transition:all 0.2s;padding:16px;margin-bottom:0">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div>
+                <div style="font-weight:600;color:#1e293b;font-size:15px">
+                  #{p.jersey_number || '?'} {p.first_name} {p.last_name}
+                </div>
+                <div style="font-size:13px;color:#6b7280;margin-top:2px">
+                  {p.team_name || 'Fără echipă'} · {p.scores.length} evaluar{p.scores.length !== 1 ? 'i' : 'e'}
+                </div>
+              </div>
+              <div style="color:#9ca3af">→</div>
+            </div>
+          </div>
+        </a>
+      ))}
     </div>
   )}
-
 </AdminLayout>
-
-<style>
-  .page-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px}
-  .page-title{font-size:20px;font-weight:700;color:#1e293b;margin:0}
-  .page-sub{font-size:13px;color:#64748b;margin:4px 0 0}
-  .card{background:#fff;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.07);padding:0;overflow:hidden}
-  .table-wrap{overflow-x:auto}
-  .table{width:100%;border-collapse:collapse;font-size:13px}
-  .table th{padding:10px 14px;border-bottom:2px solid #f1f5f9;color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase;text-align:left;white-space:nowrap}
-  .table td{padding:10px 14px;border-bottom:1px solid #f1f5f9}
-  .player-name{font-weight:600;color:#1e293b}
-  .score-cell{text-align:center}
-  .score-badge{display:inline-flex;align-items:center;gap:3px;padding:3px 8px;border-radius:12px;font-weight:600;font-size:12px}
-  .score-5{background:#dcfce7;color:#15803d}
-  .score-4{background:#d1fae5;color:#059669}
-  .score-3{background:#fef9c3;color:#92400e}
-  .score-2{background:#fee2e2;color:#b91c1c}
-  .score-1{background:#fee2e2;color:#991b1b}
-  .score-na{color:#cbd5e1}
-  .overall-score{font-weight:700;color:#0f172a;text-align:center}
-  .empty-state{text-align:center;padding:60px 20px;color:#64748b}
-  .empty-icon{font-size:48px;margin-bottom:12px}
-  .empty-state h3{font-size:18px;color:#1e293b;margin:0 0 8px}
-  .empty-state p{margin:0 0 20px;font-size:14px}
-  .btn-primary{display:inline-block;padding:10px 20px;background:#3b82f6;color:#fff;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px}
-</style>

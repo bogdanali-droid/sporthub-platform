@@ -1,0 +1,28 @@
+---
+export const prerender = false;
+import AdminLayout from '../../../../layouts/AdminLayout.astro';
+const { id } = Astro.params;
+const match = await (Astro.locals as any).runtime?.env?.DB?.prepare('SELECT * FROM matches WHERE id = ? AND club_id = ?').bind(id, (Astro.locals as any).clubId).first();
+if (!match) return Astro.redirect('/admin/matches');
+---
+<AdminLayout title="Stare live meci">
+  <a href={`/admin/matches/${id}/live`} style="color:#6b7280;font-size:14px;text-decoration:none;display:inline-flex;align-items:center;gap:6px;margin-bottom:20px">← Înapoi</a>
+  <div class="card">
+    <h2 style="font-size:16px;font-weight:700;margin-bottom:24px;color:#1e293b">{match.opponent_name}</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div class="form-group">
+        <label class="form-label">Scor acasă</label>
+        <input type="number" class="form-input" value={match.score_home || 0} />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Scor oaspeți</label>
+        <input type="number" class="form-input" value={match.score_away || 0} />
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Inning / Repriza</label>
+      <input type="number" class="form-input" min="1" />
+    </div>
+    <button class="btn btn-primary" style="width:100%;margin-top:16px">Salvează stare</button>
+  </div>
+</AdminLayout>

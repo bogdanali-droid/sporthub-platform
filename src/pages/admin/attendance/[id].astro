@@ -1,0 +1,18 @@
+---
+export const prerender = false;
+import AdminLayout from '../../../layouts/AdminLayout.astro';
+const { id } = Astro.params;
+const record = await (Astro.locals as any).runtime?.env?.DB?.prepare('SELECT a.*, p.first_name, p.last_name, tr.title FROM attendance a JOIN players p ON a.player_id = p.id JOIN trainings tr ON a.training_id = tr.id WHERE a.id = ? AND p.club_id = ?').bind(id, (Astro.locals as any).clubId).first();
+if (!record) return Astro.redirect('/admin/attendance');
+---
+<AdminLayout title={`Prezență - ${record.first_name} ${record.last_name}`}>
+  <a href="/admin/attendance" style="color:#6b7280;font-size:14px;text-decoration:none;display:inline-flex;align-items:center;gap:6px;margin-bottom:20px">← Înapoi</a>
+  <div class="card">
+    <h2 style="font-size:16px;font-weight:700;margin-bottom:24px;color:#1e293b">{record.first_name} {record.last_name}</h2>
+    <div style="display:grid;gap:16px">
+      <div><label style="font-weight:700;color:#6b7280;font-size:12px;text-transform:uppercase">Antrenament</label><p style="margin-top:4px">{record.title}</p></div>
+      <div><label style="font-weight:700;color:#6b7280;font-size:12px;text-transform:uppercase">Status</label><p style="margin-top:4px"><span class="badge badge-{record.status === 'PRESENT' ? 'green' : 'red'}">{record.status === 'PRESENT' ? 'Prezent' : 'Absent'}</span></p></div>
+      <div><label style="font-weight:700;color:#6b7280;font-size:12px;text-transform:uppercase">Data</label><p style="margin-top:4px">{record.recorded_at}</p></div>
+    </div>
+  </div>
+</AdminLayout>
