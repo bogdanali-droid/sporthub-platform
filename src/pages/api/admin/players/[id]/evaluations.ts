@@ -1,85 +1,99 @@
 export const prerender = false;
-import type { APIContext } from 'astro';
+import type { APIRoute } from 'astro';
+import { queryAll, queryFirst, execute } from '@/lib/db';
 
-export async function GET({ params, locals }: APIContext) {
-  if (!locals.user) return new Response('Unauthorized', { status: 401 });
+export const GET: APIRoute = async ({ params, locals }) => {
+  if (!locals.user || !['ADMIN', 'SUPERADMIN', 'COACH'].includes(locals.user.role))
+    return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403 });
+
   const db = (locals as any).runtime?.env?.DB;
-  if (!db) return Response.json({ error: 'DB unavailable' }, { status: 500 });
-  const clubId = (locals as any).clubId ?? locals.user?.club_id;
-  const playerId = params.id!;
+  const clubId = locals.user.club_id;
+  const playerId = params.id;
 
-  const { results: evals } = await db.prepare(
-    `SELECT pe.*, u.first_name || ' ' || u.last_name AS evaluator_name
+  const evaluations = await queryAll<any>(db,
+    `SELECT pe.*,
+            (SELECT GROUP_CONCAT(attribute_code || ':' || score, '|') FROM player_evaluation_scores WHERE evaluation_id = pe.id) AS scores_str
      FROM player_evaluations pe
-     LEFT JOIN users u ON u.id = pe.evaluated_by
      WHERE pe.player_id = ? AND pe.club_id = ?
-     ORDER BY pe.eval_date DESC`
-  ).bind(playerId, clubId).all();
+     ORDER BY pe.eval_date DESC`,
+    [playerId, clubId]);
 
-  const evalsList = evals ?? [];
-  for (const ev of evalsList as any[]) {
-    const { results: scores } = await db.prepare(
-      'SELECT attribute_code, score FROM player_evaluation_scores WHERE evaluation_id = ?'
-    ).bind(ev.id).all();
-    ev.scores = Object.fromEntries((scores ?? []).map((s: any) => [s.attribute_code, s.score]));
+  const result = evaluations.map(ev => ({
+    ...ev,
+    scores: ev.scores_str ? Object.fromEntries(
+      ev.scores_str.split('|').map((s: string) => {
+        const [k, v] = s.split(':');
+        return [k, parseFloat(v)];
+      })
+    ) : {},
+  }));
+
+  return new Response(JSON.stringify(result), {
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
+export const POST: APIRoute = async ({ params, locals, request }) => {
+  if (!locals.user || !['ADMIN', 'SUPERADMIN', 'COACH'].includes(locals.user.role))
+    return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403 });
+
+  const db = (locals as any).runtime?.env?.DB;
+  const clubId = locals.user.club_id;
+  const playerId = params.id;
+  const body = await request.json() as any;
+
+  // Verify player exists and belongs to club
+  const player = await queryFirst<any>(db,
+    'SELECT id FROM players WHERE id = ? AND club_id = ?',
+    [playerId, clubId]);
+  if (!player) return new Response(JSON.stringify({ error: 'Player not found' }), { status: 404 });
+
+  // Create evaluation
+  const evalId = (await db.prepare(
+    `INSERT INTO player_evaluations (player_id, club_id, eval_date, notes, created_by)
+     VALUES (?, ?, ?, ?, ?)
+     RETURNING id`
+  ).bind(playerId, clubId, body.eval_date, body.notes || null, locals.user.id).first<any>())?.id;
+
+  if (!evalId) return new Response(JSON.stringify({ error: 'Failed to create evaluation' }), { status: 500 });
+
+  // Insert scores
+  for (const [attrCode, score] of Object.entries(body.scores || {})) {
+    await execute(db,
+      `INSERT INTO player_evaluation_scores (evaluation_id, attribute_code, score)
+       VALUES (?, ?, ?)`,
+      [evalId, attrCode, parseFloat(score as string)]);
   }
 
-  return Response.json(evalsList);
-}
+  // Calculate overall score (average)
+  const scores = Object.values(body.scores || {}) as number[];
+  const overallScore = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
+  await execute(db,
+    'UPDATE player_evaluations SET overall_score = ? WHERE id = ?',
+    [parseFloat(overallScore.toFixed(2)), evalId]);
 
-export async function POST({ params, request, locals }: APIContext) {
-  if (!locals.user) return new Response('Unauthorized', { status: 401 });
+  return new Response(JSON.stringify({ ok: true, id: evalId }), { status: 201 });
+};
+
+export const DELETE: APIRoute = async ({ params, locals, request }) => {
+  if (!locals.user || !['ADMIN', 'SUPERADMIN', 'COACH'].includes(locals.user.role))
+    return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403 });
+
   const db = (locals as any).runtime?.env?.DB;
-  if (!db) return Response.json({ error: 'DB unavailable' }, { status: 500 });
-  const clubId = (locals as any).clubId ?? locals.user?.club_id;
-  const playerId = params.id!;
+  const clubId = locals.user.club_id;
+  const playerId = params.id;
+  const body = await request.json() as any;
 
-  const player = await db.prepare(
-    'SELECT id FROM players WHERE id = ? AND club_id = ?'
-  ).bind(playerId, clubId).first();
-  if (!player) return Response.json({ error: 'Not found' }, { status: 404 });
+  // Verify evaluation belongs to player and club
+  const evaluation = await queryFirst<any>(db,
+    'SELECT id FROM player_evaluations WHERE id = ? AND player_id = ? AND club_id = ?',
+    [body.eval_id, playerId, clubId]);
+  if (!evaluation) return new Response(JSON.stringify({ error: 'Evaluation not found' }), { status: 404 });
 
-  const body = await request.json().catch(() => null) as any;
-  if (!body) return Response.json({ error: 'Invalid JSON' }, { status: 400 });
+  // Delete scores first
+  await execute(db, 'DELETE FROM player_evaluation_scores WHERE evaluation_id = ?', [body.eval_id]);
+  // Delete evaluation
+  await execute(db, 'DELETE FROM player_evaluations WHERE id = ?', [body.eval_id]);
 
-  const { eval_date, season, notes, scores } = body;
-  if (!eval_date) return Response.json({ error: 'eval_date required' }, { status: 400 });
-
-  const scoreValues = Object.values(scores || {}) as number[];
-  const overall = scoreValues.length > 0
-    ? Math.round((scoreValues.reduce((a: number, b: number) => a + b, 0) / scoreValues.length) * 10) / 10
-    : null;
-
-  const evalId = 'ev' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
-
-  await db.prepare(
-    `INSERT INTO player_evaluations (id, player_id, club_id, evaluated_by, eval_date, season, overall_score, notes)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(evalId, playerId, clubId, locals.user.id, eval_date, season ?? null, overall, notes ?? null).run();
-
-  for (const [code, score] of Object.entries(scores || {})) {
-    const scoreId = 'sc' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
-    await db.prepare(
-      `INSERT OR REPLACE INTO player_evaluation_scores (id, evaluation_id, attribute_code, score)
-       VALUES (?, ?, ?, ?)`
-    ).bind(scoreId, evalId, code, score as number).run();
-  }
-
-  return Response.json({ ok: true, id: evalId });
-}
-
-export async function DELETE({ request, params, locals }: APIContext) {
-  if (!locals.user) return new Response('Unauthorized', { status: 401 });
-  const db = (locals as any).runtime?.env?.DB;
-  if (!db) return Response.json({ error: 'DB unavailable' }, { status: 500 });
-  const clubId = (locals as any).clubId ?? locals.user?.club_id;
-
-  const body = await request.json().catch(() => null) as any;
-  if (!body?.eval_id) return Response.json({ error: 'eval_id required' }, { status: 400 });
-
-  await db.prepare(
-    'DELETE FROM player_evaluations WHERE id = ? AND club_id = ?'
-  ).bind(body.eval_id, clubId).run();
-
-  return Response.json({ ok: true });
-}
+  return new Response(JSON.stringify({ ok: true }), { status: 200 });
+};

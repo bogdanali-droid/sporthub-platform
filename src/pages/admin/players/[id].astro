@@ -28,7 +28,7 @@ const [teams, sportConfig, evaluations, physicalTests, medicalVisits, payments] 
   queryAll<any>(db, 'SELECT * FROM player_evaluations WHERE player_id = ? AND club_id = ? ORDER BY eval_date DESC LIMIT 10', [id, clubId]),
   queryAll<any>(db, 'SELECT * FROM physical_tests WHERE player_id = ? AND club_id = ? ORDER BY test_date DESC LIMIT 10', [id, clubId]),
   queryAll<any>(db, 'SELECT * FROM medical_visits WHERE player_id = ? AND club_id = ? ORDER BY visit_date DESC LIMIT 10', [id, clubId]),
-  queryAll<any>(db, 'SELECT * FROM payments WHERE player_id = ? AND club_id = ? ORDER BY payment_date DESC LIMIT 10', [id, clubId]),
+  queryAll<any>(db, 'SELECT * FROM payments WHERE player_id = ? AND club_id = ? ORDER BY created_at DESC LIMIT 10', [id, clubId]),
 ]);
 
 const teamAssignment = await queryFirst<any>(db, 'SELECT team_id FROM team_players WHERE player_id = ? AND left_at IS NULL', [id]);
@@ -420,8 +420,8 @@ const tab = Astro.url.searchParams.get('tab') ?? 'profil';
               <table class="table">
                 <thead>
                   <tr>
-                    <th>Data</th>
-                    <th>Tip</th>
+                    <th>Scadență</th>
+                    <th>Descriere</th>
                     <th>Suma</th>
                     <th>Status</th>
                     <th>Metoda</th>
@@ -430,11 +430,11 @@ const tab = Astro.url.searchParams.get('tab') ?? 'profil';
                 <tbody>
                   {payments.map(p => (
                     <tr>
-                      <td>{new Date(p.payment_date).toLocaleDateString('ro-RO')}</td>
-                      <td>{p.payment_type || '—'}</td>
+                      <td>{p.due_date ? new Date(p.due_date).toLocaleDateString('ro-RO') : '—'}</td>
+                      <td>{p.description || '—'}</td>
                       <td>{p.amount ? `${p.amount} RON` : '—'}</td>
                       <td><span class={`badge badge-${p.status?.toLowerCase()}`}>{p.status || '—'}</span></td>
-                      <td>{p.payment_method || '—'}</td>
+                      <td>{p.method || '—'}</td>
                     </tr>
                   ))}
                 </tbody>
