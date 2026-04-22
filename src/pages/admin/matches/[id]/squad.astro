@@ -38,6 +38,19 @@ const roleColor: Record<string,string> = {
 };
 
 const positions = sport?.positions ?? [];
+
+// Gender mix analytics - using queryAll instead of db.prepare()
+const genderResults = await queryAll<any>(db,
+  `SELECT p.id, p.gender FROM players p
+   WHERE p.id IN (${selections.map(() => '?').join(',')})`,
+  selections.map(s => s.player_id)
+);
+const genderMap = new Map(genderResults.map(g => [g.id, g.gender]));
+const maleCount = selections.filter(s => genderMap.get(s.player_id) === 'M').length;
+const femaleCount = selections.filter(s => genderMap.get(s.player_id) === 'F').length;
+const starters = selections.filter((s: any) => s.role === 'STARTER');
+const starterMales = starters.filter(s => genderMap.get(s.player_id) === 'M').length;
+const starterFemales = starters.filter(s => genderMap.get(s.player_id) === 'F').length;
 ---
 
 <AdminLayout title={`Lot — vs ${match.opponent_name}`} user={user} sportCode={sport?.code} sportIcon={sport?.icon}>
@@ -49,6 +62,35 @@ const positions = sport?.positions ?? [];
       <span class="text-sm text-gray">{match.match_date?.slice(0,10)}</span>
     </div>
   </div>
+
+  <!-- GENDER MIX STATS -->
+  {selections.length > 0 && (
+    <div class="gender-stats-card">
+      <h3 style="margin:0 0 12px;font-size:13px;font-weight:600;color:#64748b;text-transform:uppercase">Analiză Gender Mix</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div style="background:#fce7f3;padding:12px;border-radius:8px">
+          <div style="font-size:11px;color:#9d174d;font-weight:600;margin-bottom:4px">TOTAL LOT</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <span style="font-size:18px;font-weight:700;color:#be185d">{maleCount}M</span>
+            <span style="font-size:18px;font-weight:700;color:#ec4899">{femaleCount}F</span>
+          </div>
+          {(sport?.code === 'BASEBALL5' || sport?.code === 'SOFTBALL') && femaleCount < 1 && (
+            <div style="font-size:11px;color:#be185d;margin-top:6px">⚠️ Fără feminin în lot</div>
+          )}
+        </div>
+        <div style="background:#dbeafe;padding:12px;border-radius:8px">
+          <div style="font-size:11px;color:#0c4a6e;font-weight:600;margin-bottom:4px">TITULARI ({starters.length})</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <span style="font-size:18px;font-weight:700;color:#0369a1">{starterMales}M</span>
+            <span style="font-size:18px;font-weight:700;color:#0ea5e9">{starterFemales}F</span>
+          </div>
+          {(sport?.code === 'BASEBALL5' || sport?.code === 'SOFTBALL') && starterFemales < 1 && (
+            <div style="font-size:11px;color:#0c4a6e;margin-top:6px">⚠️ Fără feminin titular</div>
+          )}
+        </div>
+      </div>
+    </div>
+  )}
 
   <div class="squad-grid">
 
@@ -150,6 +192,7 @@ const positions = sport?.positions ?? [];
   .back-link:hover{text-decoration:underline}
   .match-info{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
   .section-title{font-size:16px;font-weight:700;color:#1e293b;margin:0 0 12px}
+  .gender-stats-card{background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,.07);margin-bottom:24px}
   .squad-grid{display:grid;grid-template-columns:1fr 320px;gap:24px;align-items:start}
   @media(max-width:800px){.squad-grid{grid-template-columns:1fr}}
   .table-wrap{background:#fff;border-radius:12px;overflow:auto;box-shadow:0 1px 4px rgba(0,0,0,.07)}

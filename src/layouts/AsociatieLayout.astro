@@ -46,7 +46,7 @@ const currentPath = Astro.url.pathname;
 
     /* SIDEBAR */
     #sidebar {
-      width: 248px; height: 100vh; background: var(--aso-bg);
+      width: 260px; height: 100vh; background: var(--aso-bg);
       display: flex; flex-direction: column; position: fixed; top: 0; left: 0; z-index: 100;
       transition: transform .25s ease;
     }
@@ -83,7 +83,7 @@ const currentPath = Astro.url.pathname;
     .sidebar-footer { padding: 16px; border-top: 1px solid rgba(255,255,255,.12); flex-shrink: 0; }
 
     /* MAIN */
-    #main { margin-left: 248px; flex: 1; display: flex; flex-direction: column; min-height: 100vh; }
+    #main { margin-left: 260px; flex: 1; display: flex; flex-direction: column; min-height: 100vh; }
 
     /* TOPBAR */
     #topbar {
@@ -115,8 +115,16 @@ const currentPath = Astro.url.pathname;
     .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 12px 24px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; border: none; text-decoration: none; transition: all .2s ease; white-space: nowrap; }
     .btn:hover { transform: translateY(-2px); box-shadow: 0 8px 16px rgba(0,0,0,.1); }
     .btn:active { transform: translateY(0); }
+    .btn-primary { background: var(--aso-bg); color: #fff; }
+    .btn-primary:hover { background: #3a0e05; }
+    .btn-secondary { background: #f1f5f9; color: var(--aso-bg); border: 2px solid #d1d5db; }
+    .btn-secondary:hover { background: #e2e8f0; }
     .btn-accent { background: var(--aso-accent); color: #fff; font-weight: 600; }
     .btn-accent:hover { background: #ea580c; }
+    .btn-success { background: #00C48C; color: #fff; }
+    .btn-success:hover { background: #059669; }
+    .btn-danger { background: #E63946; color: #fff; }
+    .btn-danger:hover { background: #dc2626; }
     .btn-outline { background: #fff; color: #374151; border: 2px solid #d1d5db; }
     .btn-outline:hover { background: #f1f5f9; }
     .btn-sm { padding: 8px 16px; font-size: 13px; }
@@ -126,16 +134,16 @@ const currentPath = Astro.url.pathname;
     .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid #e2e8f0; }
     .card-title { font-family: var(--font-brand); font-size: 16px; font-weight: 700; color: #1e293b; }
 
-    .stat-card { background: #fff; border-radius: 10px; padding: 20px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
-    .stat-value { font-family: var(--font-brand); font-size: 28px; font-weight: 700; color: #431407; }
-    .stat-label { font-size: 12px; color: #64748b; margin-top: 4px; }
+    .stat-card { background: #fff; border-radius: 12px; padding: 28px; box-shadow: 0 1px 3px rgba(0,0,0,.08); border: 1px solid #e2e8f0; }
+    .stat-value { font-family: var(--font-brand); font-size: 32px; font-weight: 800; color: var(--aso-accent); margin-bottom: 8px; }
+    .stat-label { font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: .05em; }
 
-    .table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
-    .table th { padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: #64748b; border-bottom: 2px solid #f1f5f9; }
-    .table td { padding: 11px 12px; border-bottom: 1px solid #f8fafc; color: #374151; vertical-align: middle; }
+    .table { width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; }
+    .table th { padding: 14px 16px; text-align: left; font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: #475569; border-bottom: 2px solid #e2e8f0; background: #f8fafc; }
+    .table td { padding: 14px 16px; border-bottom: 1px solid #e2e8f0; color: #374151; }
     .table tr:hover td { background: #f8fafc; }
 
-    .badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+    .badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 8px; font-size: 12px; font-weight: 700; }
     .badge-green { background: #dcfce7; color: #166534; }
     .badge-yellow { background: #fef9c3; color: #854d0e; }
     .badge-red { background: #fee2e2; color: #991b1b; }
@@ -162,8 +170,10 @@ const currentPath = Astro.url.pathname;
     .modal-footer { padding: 16px 24px; border-top: 1px solid #f1f5f9; display: flex; justify-content: flex-end; gap: 8px; }
 
     .alert { padding: 12px 16px; border-radius: 8px; font-size: 13.5px; margin-bottom: 16px; }
-    .alert-success { background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; }
+    .alert-info { background: #eff6ff; border: 1px solid #bfdbfe; color: #1d4ed8; }
     .alert-warning { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
+    .alert-success { background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; }
+    .alert-error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
 
     /* Portal bar offset */
     body.has-portal-bar { padding-top: 40px; }

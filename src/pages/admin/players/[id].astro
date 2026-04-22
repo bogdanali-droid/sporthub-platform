@@ -8,14 +8,12 @@ const user = Astro.locals.user;
 if (!user) return Astro.redirect('/login');
 
 const db = (Astro.locals as any).runtime?.env?.DB;
-const clubId = Astro.locals.clubId;
+const clubId = (Astro.locals as any).clubId ?? Astro.locals.user?.club_id;
 const { id } = Astro.params;
-
 if (!id) return Astro.redirect('/admin/players');
 
 const player = await queryFirst<any>(db,
-  `SELECT p.*, t.name as team_name
-   FROM players p
+  `SELECT p.*, t.name as team_name FROM players p
    LEFT JOIN team_players tp ON p.id = tp.player_id AND tp.left_at IS NULL
    LEFT JOIN teams t ON tp.team_id = t.id
    WHERE p.id = ? AND p.club_id = ?`,
@@ -24,193 +22,652 @@ const player = await queryFirst<any>(db,
 
 if (!player) return Astro.redirect('/admin/players');
 
-const teams = await queryAll<any>(db,
-  'SELECT id, name, age_group FROM teams WHERE club_id = ? AND is_active = 1 ORDER BY age_group, name',
-  [clubId]
-);
+const [teams, sportConfig, evaluations, physicalTests, medicalVisits, payments] = await Promise.all([
+  queryAll<any>(db, 'SELECT id, name, age_group FROM teams WHERE club_id = ? AND is_active = 1 ORDER BY age_group, name', [clubId]),
+  getClubSportConfig(db, clubId),
+  queryAll<any>(db, 'SELECT * FROM player_evaluations WHERE player_id = ? AND club_id = ? ORDER BY eval_date DESC LIMIT 10', [id, clubId]),
+  queryAll<any>(db, 'SELECT * FROM physical_tests WHERE player_id = ? AND club_id = ? ORDER BY test_date DESC LIMIT 10', [id, clubId]),
+  queryAll<any>(db, 'SELECT * FROM medical_visits WHERE player_id = ? AND club_id = ? ORDER BY visit_date DESC LIMIT 10', [id, clubId]),
+  queryAll<any>(db, 'SELECT * FROM payments WHERE player_id = ? AND club_id = ? ORDER BY payment_date DESC LIMIT 10', [id, clubId]),
+]);
 
-const sportConfig = db && clubId ? await getClubSportConfig(db, clubId) : null;
-const positions = sportConfig?.positions ?? [];
-
-// Get current team assignment
-const teamAssignment = await queryFirst<any>(db,
-  `SELECT team_id FROM team_players WHERE player_id = ? AND left_at IS NULL`,
-  [id]
-);
-
+const teamAssignment = await queryFirst<any>(db, 'SELECT team_id FROM team_players WHERE player_id = ? AND left_at IS NULL', [id]);
 const currentTeamId = teamAssignment?.team_id ?? '';
+const positions = sportConfig?.positions ?? [];
+const evalAttrs = sportConfig?.evaluationAttributes ?? [];
+
+// Load evaluation scores
+for (const ev of evaluations) {
+  const { results: scores } = await db.prepare('SELECT attribute_code, score FROM player_evaluation_scores WHERE evaluation_id = ?').bind(ev.id).all();
+  (ev as any).scores = Object.fromEntries((scores ?? []).map((s: any) => [s.attribute_code, s.score]));
+}
+
+const tab = Astro.url.searchParams.get('tab') ?? 'profil';
 ---
 
 <AdminLayout title={`${player.first_name} ${player.last_name}`}>
-  <div style="max-width:720px">
+  <div style="max-width:1000px">
     <a href="/admin/players" style="color:#6b7280;font-size:14px;text-decoration:none;display:inline-flex;align-items:center;gap:6px;margin-bottom:20px">← Înapoi la jucători</a>
 
     <div class="card">
-      <h2 style="font-size:18px;font-weight:700;margin-bottom:24px;color:#1e293b">Editează jucătorul</h2>
+      <div class="tabs-nav">
+        <a href={`?tab=profil`} class={`tab-btn ${tab === 'profil' ? 'active' : ''}`}>👤 Profil</a>
+        <a href={`?tab=evaluari`} class={`tab-btn ${tab === 'evaluari' ? 'active' : ''}`}>⭐ Evaluări</a>
+        <a href={`?tab=fizic`} class={`tab-btn ${tab === 'fizic' ? 'active' : ''}`}>💪 Teste Fizice</a>
+        <a href={`?tab=medical`} class={`tab-btn ${tab === 'medical' ? 'active' : ''}`}>🏥 Medical</a>
+        <a href={`?tab=plati`} class={`tab-btn ${tab === 'plati' ? 'active' : ''}`}>💳 Plăți</a>
+      </div>
 
-      <form method="POST" action={`/api/admin/players/${id}`} id="player-form">
-        <input type="hidden" name="_method" value="PUT" />
+      <!-- TAB: PROFIL -->
+      {tab === 'profil' && (
+        <div class="tab-content">
+          <h2 style="font-size:18px;font-weight:700;margin-bottom:24px;color:#1e293b">Editează Jucătorul</h2>
 
-        <h3 style="font-size:14px;font-weight:700;margin-bottom:16px;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em">Date personale</h3>
+          <form id="player-form" style="display:flex;flex-direction:column;gap:20px">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+              <div class="form-group">
+                <label class="form-label">Prenume *</label>
+                <input name="first_name" class="form-input" required value={player.first_name || ''} />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Nume *</label>
+                <input name="last_name" class="form-input" required value={player.last_name || ''} />
+              </div>
+            </div>
 
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-          <div class="form-group">
-            <label class="form-label">Prenume *</label>
-            <input name="first_name" class="form-input" required placeholder="ex: Ion" value={player.first_name || ''} />
-          </div>
-          <div class="form-group">
-            <label class="form-label">Nume *</label>
-            <input name="last_name" class="form-input" required placeholder="ex: Popescu" value={player.last_name || ''} />
-          </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+              <div class="form-group">
+                <label class="form-label">Data nașterii</label>
+                <input name="birth_date" type="date" class="form-input" value={player.birth_date || ''} />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Gen</label>
+                <select name="gender" class="form-select">
+                  <option value="">— Nespecificat —</option>
+                  <option value="M" selected={player.gender === 'M'}>Masculin</option>
+                  <option value="F" selected={player.gender === 'F'}>Feminin</option>
+                </select>
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+              <div class="form-group">
+                <label class="form-label">Echipă</label>
+                <select name="team_id" class="form-select">
+                  <option value="">— Fără echipă —</option>
+                  {teams.map(t => <option value={t.id} selected={currentTeamId === t.id}>{t.name} ({t.age_group})</option>)}
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Post</label>
+                <select name="position" class="form-select">
+                  <option value="">— Nespecificat —</option>
+                  {positions.map(p => <option value={p.code} selected={player.position === p.code}>{p.name_ro} {p.abbreviation ? `(${p.abbreviation})` : ''}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+              <div class="form-group">
+                <label class="form-label">Nr. tricou</label>
+                <input name="jersey_number" type="number" class="form-input" placeholder="ex: 10" min="1" max="99" value={player.jersey_number || ''} />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Status</label>
+                <select name="status" class="form-select">
+                  <option value="ACTIVE" selected={player.status === 'ACTIVE'}>Activ</option>
+                  <option value="INACTIVE" selected={player.status === 'INACTIVE'}>Inactiv</option>
+                  <option value="INJURED" selected={player.status === 'INJURED'}>Accidentat</option>
+                  <option value="SUSPENDED" selected={player.status === 'SUSPENDED'}>Suspendat</option>
+                </select>
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+              <div class="form-group">
+                <label class="form-label">Nr. legitimație</label>
+                <input name="license_number" class="form-input" value={player.license_number || ''} />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Data legitimației</label>
+                <input name="license_date" type="date" class="form-input" value={player.license_date || ''} />
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+              <div class="form-group">
+                <label class="form-label">CNP</label>
+                <input name="cnp" class="form-input" placeholder="1850101123456" value={player.cnp || ''} />
+              </div>
+              <div class="form-group">
+                <label class="form-label">ID Federație</label>
+                <input name="federation_id" class="form-input" value={player.federation_id || ''} />
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Adresă</label>
+              <input name="address" class="form-input" value={player.address || ''} />
+            </div>
+
+            <h3 style="font-size:13px;font-weight:700;margin-top:16px;color:#6b7280;text-transform:uppercase">Contact Părinte</h3>
+            <div class="form-group">
+              <label class="form-label">Nume Părinte</label>
+              <input name="parent_name" class="form-input" value={player.parent_name || ''} />
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+              <div class="form-group">
+                <label class="form-label">Telefon</label>
+                <input name="parent_phone" type="tel" class="form-input" value={player.parent_phone || ''} />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Email</label>
+                <input name="parent_email" type="email" class="form-input" value={player.parent_email || ''} />
+              </div>
+            </div>
+
+            <h3 style="font-size:13px;font-weight:700;margin-top:16px;color:#6b7280;text-transform:uppercase">Contact Jucător</h3>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px">
+              <div class="form-group">
+                <label class="form-label">Email</label>
+                <input name="player_email" type="email" class="form-input" value={player.player_email || ''} />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Telefon</label>
+                <input name="player_phone" class="form-input" value={player.player_phone || ''} />
+              </div>
+              <div class="form-group">
+                <label class="form-label">WhatsApp</label>
+                <input name="player_whatsapp" class="form-input" value={player.player_whatsapp || ''} />
+              </div>
+            </div>
+
+            <h3 style="font-size:13px;font-weight:700;margin-top:16px;color:#6b7280;text-transform:uppercase">Contact Urgență</h3>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+              <div class="form-group">
+                <label class="form-label">Persoană</label>
+                <input name="emergency_contact" class="form-input" value={player.emergency_contact || ''} />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Telefon</label>
+                <input name="emergency_phone" type="tel" class="form-input" value={player.emergency_phone || ''} />
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Observații</label>
+              <textarea name="notes" class="form-textarea" rows="2">{player.notes || ''}</textarea>
+            </div>
+
+            <div style="display:flex;gap:12px;justify-content:flex-end">
+              <a href="/admin/players" class="btn btn-ghost">Anulează</a>
+              <button type="submit" class="btn btn-primary">Salvează Profil</button>
+              <button type="button" class="btn btn-danger" onclick="deletePlayer()">🗑️ Șterge</button>
+            </div>
+          </form>
+
+          <div id="toast" class="toast hidden"></div>
         </div>
+      )}
 
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-          <div class="form-group">
-            <label class="form-label">Data nașterii *</label>
-            <input name="birth_date" type="date" class="form-input" required value={player.birth_date || ''} />
-          </div>
-          <div class="form-group">
-            <label class="form-label">Gen</label>
-            <select name="gender" class="form-select">
-              <option value="">— Nespecificat —</option>
-              <option value="M" selected={player.gender === 'M'}>Masculin</option>
-              <option value="F" selected={player.gender === 'F'}>Feminin</option>
-            </select>
-          </div>
-        </div>
+      <!-- TAB: EVALUĂRI -->
+      {tab === 'evaluari' && (
+        <div class="tab-content">
+          <h2 style="font-size:18px;font-weight:700;margin-bottom:24px;color:#1e293b">Evaluări Jucător</h2>
 
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-          <div class="form-group">
-            <label class="form-label">Echipă</label>
-            <select name="team_id" class="form-select">
-              <option value="">— Fără echipă —</option>
-              {teams.map((t: any) => (
-                <option value={t.id} selected={currentTeamId === t.id}>{t.name} ({t.age_group})</option>
+          <div class="form-card">
+            <h3 style="font-size:14px;font-weight:600;margin-bottom:16px">Adaugă Evaluare</h3>
+            <div class="form-group">
+              <label class="form-label">Data Evaluării *</label>
+              <input type="date" id="eval-date" class="form-input" value={new Date().toISOString().split('T')[0]} />
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:12px;margin:16px 0">
+              {evalAttrs.map(attr => (
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:8px;background:#f8fafc;border-radius:6px">
+                  <label style="font-size:13px;font-weight:500;color:#1e293b">{attr.name_ro}</label>
+                  <div style="display:flex;gap:4px" id={`attr-${attr.code}`}>
+                    {[1,2,3,4,5].map(n => (
+                      <button type="button" class="star-btn" data-attr={attr.code} data-val={n} onclick={`setStar('${attr.code}', ${n}, this)`}>★</button>
+                    ))}
+                  </div>
+                </div>
               ))}
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Post</label>
-            <select name="position" class="form-select">
-              <option value="">— Nespecificat —</option>
-              {positions.map((p: any) => (
-                <option value={p.code} selected={player.position === p.code}>{p.name_ro}{p.abbreviation ? ` (${p.abbreviation})` : ''}</option>
-              ))}
-            </select>
-          </div>
-        </div>
+            </div>
 
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-          <div class="form-group">
-            <label class="form-label">Nr. tricou</label>
-            <input name="jersey_number" type="number" class="form-input" placeholder="ex: 10" min="1" max="99" value={player.jersey_number || ''} />
-          </div>
-          <div class="form-group">
-            <label class="form-label">Status</label>
-            <select name="status" class="form-select">
-              <option value="ACTIVE" selected={player.status === 'ACTIVE'}>Activ</option>
-              <option value="INACTIVE" selected={player.status === 'INACTIVE'}>Inactiv</option>
-              <option value="INJURED" selected={player.status === 'INJURED'}>Accidentat</option>
-              <option value="SUSPENDED" selected={player.status === 'SUSPENDED'}>Suspendat</option>
-              <option value="TRANSFERRED" selected={player.status === 'TRANSFERRED'}>Transferat</option>
-            </select>
-          </div>
-        </div>
+            <div class="form-group">
+              <label class="form-label">Observații</label>
+              <textarea id="eval-notes" class="form-textarea" rows="2" placeholder="Observații opționale"></textarea>
+            </div>
 
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-          <div class="form-group">
-            <label class="form-label">Nr. legitimație</label>
-            <input name="license_number" class="form-input" placeholder="ex: FED-2024-1234" value={player.license_number || ''} />
+            <button type="button" class="btn btn-primary" onclick="saveEvaluation()" style="width:100%">Salvează Evaluare</button>
           </div>
-          <div class="form-group">
-            <label class="form-label">ID Federație</label>
-            <input name="federation_id" class="form-input" value={player.federation_id || ''} />
-          </div>
-        </div>
 
-        <h3 style="font-size:14px;font-weight:700;margin:24px 0 16px;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em">Contact părinte / tutore</h3>
-        <div class="form-group">
-          <label class="form-label">Nume părinte</label>
-          <input name="parent_name" class="form-input" value={player.parent_name || ''} />
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-          <div class="form-group">
-            <label class="form-label">Telefon</label>
-            <input name="parent_phone" type="tel" class="form-input" value={player.parent_phone || ''} />
-          </div>
-          <div class="form-group">
-            <label class="form-label">Email</label>
-            <input name="parent_email" type="email" class="form-input" value={player.parent_email || ''} />
-          </div>
-        </div>
+          <h3 style="font-size:14px;font-weight:600;margin-top:24px;margin-bottom:16px">Profil Competențe (Medie)</h3>
+          {evaluations.length === 0 ? (
+            <p style="color:#94a3b8;font-size:13px">Nicio evaluare înregistrată.</p>
+          ) : (
+            <div style="background:#fff;border-radius:12px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,.1);max-width:500px;margin:0 auto 24px">
+              <canvas id="radar-chart"></canvas>
+            </div>
+          )}
 
-        <h3 style="font-size:14px;font-weight:700;margin:24px 0 16px;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em">Contact jucător (opțional)</h3>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px">
-          <div class="form-group">
-            <label class="form-label">Email jucător</label>
-            <input name="player_email" type="email" class="form-input" value={player.player_email || ''} />
-          </div>
-          <div class="form-group">
-            <label class="form-label">Telefon jucător</label>
-            <input name="player_phone" class="form-input" value={player.player_phone || ''} />
-          </div>
-          <div class="form-group">
-            <label class="form-label">WhatsApp</label>
-            <input name="player_whatsapp" class="form-input" value={player.player_whatsapp || ''} />
-          </div>
+          <h3 style="font-size:14px;font-weight:600;margin-top:24px;margin-bottom:16px">Evaluări Anterioare</h3>
+          {evaluations.length === 0 ? (
+            <p style="color:#94a3b8;font-size:13px">Nicio evaluare înregistrată.</p>
+          ) : (
+            <div style="overflow-x:auto">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Data</th>
+                    <th>Evaluator</th>
+                    <th>Scor General</th>
+                    <th>Acțiuni</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {evaluations.map(ev => (
+                    <tr>
+                      <td>{new Date(ev.eval_date).toLocaleDateString('ro-RO')}</td>
+                      <td>{(ev as any).evaluator_name || '—'}</td>
+                      <td>{ev.overall_score ? ev.overall_score.toFixed(1) : '—'}</td>
+                      <td>
+                        <button type="button" class="btn-tiny" onclick={`deleteEvaluation('${ev.id}')`}>Șterge</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
+      )}
 
-        <h3 style="font-size:14px;font-weight:700;margin:24px 0 16px;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em">Contact urgență</h3>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-          <div class="form-group">
-            <label class="form-label">Persoană urgență</label>
-            <input name="emergency_contact" class="form-input" value={player.emergency_contact || ''} />
-          </div>
-          <div class="form-group">
-            <label class="form-label">Telefon urgență</label>
-            <input name="emergency_phone" type="tel" class="form-input" value={player.emergency_phone || ''} />
-          </div>
-        </div>
+      <!-- TAB: TESTE FIZICE -->
+      {tab === 'fizic' && (
+        <div class="tab-content">
+          <h2 style="font-size:18px;font-weight:700;margin-bottom:24px;color:#1e293b">Teste Fizice</h2>
 
-        <div class="form-group">
-          <label class="form-label">Observații</label>
-          <textarea name="notes" class="form-textarea" rows="2">{player.notes || ''}</textarea>
-        </div>
+          <div class="form-card">
+            <h3 style="font-size:14px;font-weight:600;margin-bottom:16px">Adaugă Test Fizic</h3>
+            <div class="form-group">
+              <label class="form-label">Data Testului *</label>
+              <input type="date" id="test-date" class="form-input" value={new Date().toISOString().split('T')[0]} />
+            </div>
 
-        <div style="display:flex;gap:12px;justify-content:flex-end">
-          <a href="/admin/players" class="btn btn-ghost">Anulează</a>
-          <button type="submit" class="btn btn-primary">Salvează modificări</button>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+              <div class="form-group">
+                <label class="form-label">Înălțime (cm)</label>
+                <input type="number" id="test-height" class="form-input" placeholder="180" step="0.1" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Greutate (kg)</label>
+                <input type="number" id="test-weight" class="form-input" placeholder="75" step="0.1" />
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+              <div class="form-group">
+                <label class="form-label">Sprint 20m (s)</label>
+                <input type="number" id="test-sprint20" class="form-input" placeholder="3.2" step="0.01" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Săritură în lungime (cm)</label>
+                <input type="number" id="test-broad-jump" class="form-input" placeholder="200" />
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Forță de prindere (kg)</label>
+              <input type="number" id="test-grip" class="form-input" placeholder="35" step="0.1" />
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Observații</label>
+              <textarea id="test-notes" class="form-textarea" rows="2" placeholder="Observații opționale"></textarea>
+            </div>
+
+            <button type="button" class="btn btn-primary" onclick="savePhysicalTest()" style="width:100%">Salvează Test</button>
+          </div>
+
+          <h3 style="font-size:14px;font-weight:600;margin-top:24px;margin-bottom:16px">Teste Anterioare</h3>
+          {physicalTests.length === 0 ? (
+            <p style="color:#94a3b8;font-size:13px">Niciun test înregistrat.</p>
+          ) : (
+            <div style="overflow-x:auto">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Data</th>
+                    <th>Înălțime</th>
+                    <th>Greutate</th>
+                    <th>Sprint 20m</th>
+                    <th>Săritură</th>
+                    <th>Prindere</th>
+                    <th>Acțiuni</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {physicalTests.map(test => {
+                    const extra = test.extra_data ? JSON.parse(test.extra_data) : {};
+                    return (
+                      <tr>
+                        <td>{new Date(test.test_date).toLocaleDateString('ro-RO')}</td>
+                        <td>{test.height_cm ? `${test.height_cm} cm` : '—'}</td>
+                        <td>{test.weight_kg ? `${test.weight_kg} kg` : '—'}</td>
+                        <td>{extra.sprint_20m ? `${extra.sprint_20m}s` : '—'}</td>
+                        <td>{test.broad_jump ? `${test.broad_jump} cm` : '—'}</td>
+                        <td>{extra.grip_strength_kg ? `${extra.grip_strength_kg} kg` : '—'}</td>
+                        <td>
+                          <button type="button" class="btn-tiny" onclick={`deletePhysical('${test.id}')`}>Șterge</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
-      </form>
+      )}
+
+      <!-- TAB: MEDICAL -->
+      {tab === 'medical' && (
+        <div class="tab-content">
+          <h2 style="font-size:18px;font-weight:700;margin-bottom:24px;color:#1e293b">Vizite Medicale</h2>
+          {medicalVisits.length === 0 ? (
+            <p style="color:#94a3b8;font-size:13px">Nicio vizită medicală înregistrată.</p>
+          ) : (
+            <div style="overflow-x:auto">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Data</th>
+                    <th>Valabil până</th>
+                    <th>Doctor</th>
+                    <th>Clinică</th>
+                    <th>Înălțime</th>
+                    <th>Greutate</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {medicalVisits.map(m => (
+                    <tr>
+                      <td>{new Date(m.visit_date).toLocaleDateString('ro-RO')}</td>
+                      <td>{m.valid_until ? new Date(m.valid_until).toLocaleDateString('ro-RO') : '—'}</td>
+                      <td>{m.doctor_name || '—'}</td>
+                      <td>{m.clinic_name || '—'}</td>
+                      <td>{m.height_cm || '—'}</td>
+                      <td>{m.weight_kg || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      <!-- TAB: PLĂȚI -->
+      {tab === 'plati' && (
+        <div class="tab-content">
+          <h2 style="font-size:18px;font-weight:700;margin-bottom:24px;color:#1e293b">Plăți</h2>
+          {payments.length === 0 ? (
+            <p style="color:#94a3b8;font-size:13px">Nicio plată înregistrată.</p>
+          ) : (
+            <div style="overflow-x:auto">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Data</th>
+                    <th>Tip</th>
+                    <th>Suma</th>
+                    <th>Status</th>
+                    <th>Metoda</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {payments.map(p => (
+                    <tr>
+                      <td>{new Date(p.payment_date).toLocaleDateString('ro-RO')}</td>
+                      <td>{p.payment_type || '—'}</td>
+                      <td>{p.amount ? `${p.amount} RON` : '—'}</td>
+                      <td><span class={`badge badge-${p.status?.toLowerCase()}`}>{p.status || '—'}</span></td>
+                      <td>{p.payment_method || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   </div>
 
-  <script>
+  <style>
+    .tabs-nav { display: flex; gap: 0; border-bottom: 2px solid #e2e8f0; margin-bottom: 24px; }
+    .tab-btn { padding: 12px 20px; border: none; background: none; cursor: pointer; font-size: 13px; font-weight: 600; color: #6b7280; border-bottom: 3px solid transparent; margin-bottom: -2px; transition: all 0.2s; text-decoration: none; }
+    .tab-btn:hover { color: #1e293b; }
+    .tab-btn.active { color: #3b82f6; border-bottom-color: #3b82f6; }
+    .tab-content { animation: fadeIn 0.2s; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    .form-card { background: #f8fafc; padding: 16px; border-radius: 8px; margin-bottom: 20px; }
+    .table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .table th, .table td { padding: 10px; text-align: left; border-bottom: 1px solid #e2e8f0; }
+    .table th { background: #f1f5f9; font-weight: 600; color: #475569; }
+    .table tr:hover { background: #f8fafc; }
+    .btn-tiny { padding: 4px 8px; font-size: 11px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    .btn-tiny:hover { background: #dc2626; }
+    .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #10b981; color: white; padding: 12px 20px; border-radius: 8px; font-size: 13px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
+    .toast.hidden { display: none; }
+    .star-btn { background: none; border: none; cursor: pointer; font-size: 24px; color: #d1d5db; padding: 0; line-height: 1; transition: color 0.1s; }
+    .star-btn:hover { color: #fbbf24; }
+    .star-btn.active { color: #f59e0b; }
+    .badge { display: inline-block; padding: 3px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+    .badge-paid { background: #d1fae5; color: #065f46; }
+    .badge-pending { background: #fef3c7; color: #92400e; }
+    .badge-cancelled { background: #fee2e2; color: #991b1b; }
+  </style>
+
+  <script define:vars={{ playerId: id, clubId, evalData: JSON.stringify(evaluations), attrsData: JSON.stringify(evalAttrs) }}>
+    const evalScores = {};
+    const EVAL_DATA = JSON.parse(evalData);
+    const ATTRS_DATA = JSON.parse(attrsData);
+
+    function setStar(attr, val, btn) {
+      evalScores[attr] = val;
+      const row = btn.closest('[id^="attr-"]');
+      if (row) row.querySelectorAll('.star-btn').forEach(b => {
+        const bVal = parseInt(b.dataset.val);
+        b.classList.toggle('active', bVal <= val);
+      });
+    }
+
+    async function apiFetch(path, opts = {}) {
+      const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+      if (!res.ok) {
+        const t = await res.text();
+        console.error(path, t);
+        showToast('Eroare: ' + t, 'error');
+        return null;
+      }
+      return res.json();
+    }
+
+    function showToast(msg, type = 'success') {
+      const toast = document.getElementById('toast');
+      toast.textContent = msg;
+      toast.className = `toast ${type === 'error' ? '' : 'hidden'}`;
+      setTimeout(() => toast.classList.add('hidden'), 3000);
+    }
+
+    async function saveEvaluation() {
+      const evalDate = document.getElementById('eval-date').value;
+      if (!evalDate || Object.keys(evalScores).length === 0) {
+        showToast('Data și cel puțin o notă sunt obligatorii', 'error');
+        return;
+      }
+      const res = await apiFetch(`/api/admin/players/${playerId}/evaluations`, {
+        method: 'POST',
+        body: JSON.stringify({
+          eval_date: evalDate,
+          notes: document.getElementById('eval-notes').value || null,
+          scores: evalScores
+        })
+      });
+      if (res) {
+        showToast('Evaluare salvată!');
+        setTimeout(() => window.location.reload(), 1500);
+      }
+    }
+
+    async function deleteEvaluation(evalId) {
+      if (!confirm('Ștergi evaluarea?')) return;
+      const res = await apiFetch(`/api/admin/players/${playerId}/evaluations`, {
+        method: 'DELETE',
+        body: JSON.stringify({ eval_id: evalId })
+      });
+      if (res) {
+        showToast('Evaluare ștearsă');
+        setTimeout(() => window.location.reload(), 1000);
+      }
+    }
+
+    async function savePhysicalTest() {
+      const testDate = document.getElementById('test-date').value;
+      if (!testDate) {
+        showToast('Data testului este obligatorie', 'error');
+        return;
+      }
+      const res = await apiFetch(`/api/admin/players/${playerId}/physical`, {
+        method: 'POST',
+        body: JSON.stringify({
+          test_date: testDate,
+          height_cm: parseFloat(document.getElementById('test-height').value) || null,
+          weight_kg: parseFloat(document.getElementById('test-weight').value) || null,
+          sprint_20m: parseFloat(document.getElementById('test-sprint20').value) || null,
+          broad_jump_cm: parseFloat(document.getElementById('test-broad-jump').value) || null,
+          grip_strength_kg: parseFloat(document.getElementById('test-grip').value) || null,
+          notes: document.getElementById('test-notes').value || null
+        })
+      });
+      if (res) {
+        showToast('Test salvat!');
+        setTimeout(() => window.location.reload(), 1500);
+      }
+    }
+
+    async function deletePhysical(testId) {
+      if (!confirm('Ștergi testul fizic?')) return;
+      const res = await apiFetch(`/api/admin/players/${playerId}/physical`, {
+        method: 'DELETE',
+        body: JSON.stringify({ test_id: testId })
+      });
+      if (res) {
+        showToast('Test șters');
+        setTimeout(() => window.location.reload(), 1000);
+      }
+    }
+
+    async function deletePlayer() {
+      if (!confirm('Ștergi jucătorul și TOATĂ datele asociate? Aceasta este ireversibil!')) return;
+      const res = await apiFetch(`/api/admin/players/${playerId}`, {
+        method: 'DELETE'
+      });
+      if (res) {
+        showToast('Jucător șters');
+        setTimeout(() => window.location.href = '/admin/players', 1000);
+      }
+    }
+
     document.getElementById('player-form')?.addEventListener('submit', async (e) => {
       e.preventDefault();
       const form = e.target as HTMLFormElement;
-      const formData = new FormData(form);
-
+      const fd = new FormData(form);
       const data: any = {};
-      formData.forEach((val, key) => {
-        if (key !== '_method') data[key] = val;
+      fd.forEach((val, key) => { data[key] = val || null; });
+
+      const res = await apiFetch(`/api/admin/players/${playerId}`, {
+        method: 'PUT',
+        body: JSON.stringify(data)
       });
-
-      try {
-        const res = await fetch(form.action, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(data)
-        });
-
-        if (res.ok) {
-          window.location.href = '/admin/players';
-        } else {
-          alert('Eroare la salvare');
-        }
-      } catch (err) {
-        alert('Eroare: ' + (err instanceof Error ? err.message : 'unknown'));
+      if (res) {
+        showToast('Jucător salvat!');
+        setTimeout(() => window.location.reload(), 1500);
       }
     });
+
+    // Radar chart initialization for evaluations
+    (async () => {
+      const chartEl = document.getElementById('radar-chart') as HTMLCanvasElement;
+      if (!chartEl) return;
+
+      try {
+        // Load Chart.js from CDN
+        if (!window.Chart) {
+          const script = document.createElement('script');
+          script.src = 'https://cdn.jsdelivr.net/npm/chart.js';
+          script.onload = () => initRadarChart();
+          document.head.appendChild(script);
+        } else {
+          initRadarChart();
+        }
+      } catch (e) {
+        console.error('Failed to load Chart.js:', e);
+      }
+
+      function initRadarChart() {
+        if (EVAL_DATA.length === 0 || ATTRS_DATA.length === 0) return;
+
+        // Calculate average scores per attribute
+        const attrMap = new Map();
+        ATTRS_DATA.forEach((attr: any) => attrMap.set(attr.code, { name: attr.name_ro, scores: [] }));
+
+        EVAL_DATA.forEach((ev: any) => {
+          const scores = ev.scores || {};
+          Object.entries(scores).forEach(([code, score]: [string, any]) => {
+            const attr = attrMap.get(code);
+            if (attr) attr.scores.push(parseFloat(score));
+          });
+        });
+
+        const labels = Array.from(attrMap.values()).map((a: any) => a.name);
+        const data = Array.from(attrMap.values()).map((a: any) => {
+          const avg = a.scores.length > 0 ? a.scores.reduce((s: number, v: number) => s + v, 0) / a.scores.length : 0;
+          return parseFloat(avg.toFixed(2));
+        });
+
+        new Chart(chartEl, {
+          type: 'radar',
+          data: {
+            labels,
+            datasets: [
+              {
+                label: 'Medie Evaluări',
+                data,
+                borderColor: 'rgb(59, 130, 246)',
+                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                pointBackgroundColor: 'rgb(59, 130, 246)',
+                pointBorderColor: '#fff',
+                pointHoverBackgroundColor: '#fff',
+                pointHoverBorderColor: 'rgb(59, 130, 246)',
+                pointRadius: 4,
+                pointHoverRadius: 6,
+                borderWidth: 2,
+                tension: 0.4
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            plugins: { legend: { display: true, position: 'bottom' as const } },
+            scales: { r: { beginAtZero: true, max: 5, ticks: { stepSize: 1 } } }
+          }
+        });
+      }
+    })();
   </script>
 </AdminLayout>
