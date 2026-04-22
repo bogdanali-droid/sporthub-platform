@@ -449,7 +449,37 @@ async function saveEval() {
   alert('Evaluare salvată!');
 }
 
-// Auto-refresh state every 5s
+// Flash a score element green briefly when its value changes
+function flashScore(el, newVal) {
+  const cur = el.textContent.trim();
+  el.textContent = newVal;
+  if (cur !== String(newVal)) {
+    el.style.transition = 'background-color 0.15s ease';
+    el.style.backgroundColor = '#bbf7d0';
+    el.style.borderRadius = '6px';
+    setTimeout(() => {
+      el.style.transition = 'background-color 0.8s ease';
+      el.style.backgroundColor = '';
+    }, 600);
+  }
+}
+
+// Update the "last updated" timestamp in the badge area
+function updateLastUpdated() {
+  const t = new Date();
+  const ts = t.toLocaleTimeString('ro-RO', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  let indicator = document.getElementById('poll-last-updated');
+  if (!indicator) {
+    indicator = document.createElement('span');
+    indicator.id = 'poll-last-updated';
+    indicator.style.cssText = 'font-size:11px;color:#94a3b8;font-weight:400;margin-left:8px';
+    const badge = document.getElementById('status-badge');
+    if (badge && badge.parentNode) badge.parentNode.insertBefore(indicator, badge.nextSibling);
+  }
+  indicator.textContent = `Actualizat: ${ts}`;
+}
+
+// Auto-refresh box score every 2s when LIVE, 5s otherwise
 async function pollState() {
   const data = await apiFetch(`/api/admin/matches/${MATCH_ID}/live-state`);
   if (!data) return;
@@ -462,16 +492,67 @@ async function pollState() {
     if (h && document.activeElement !== h) h.value = p?.bottom ?? '';
     if (a && document.activeElement !== a) a.value = p?.top ?? '';
   }
-  document.getElementById('score-home').textContent = data.match.score_home ?? 0;
-  document.getElementById('score-away').textContent = data.match.score_away ?? 0;
-  document.getElementById('total-home').textContent = data.match.score_home ?? 0;
-  document.getElementById('total-away').textContent = data.match.score_away ?? 0;
+  const scoreHome = data.match.score_home ?? 0;
+  const scoreAway = data.match.score_away ?? 0;
+  flashScore(document.getElementById('score-home'), scoreHome);
+  flashScore(document.getElementById('score-away'), scoreAway);
+  const totalHome = document.getElementById('total-home');
+  const totalAway = document.getElementById('total-away');
+  if (totalHome) totalHome.textContent = scoreHome;
+  if (totalAway) totalAway.textContent = scoreAway;
+  updateLastUpdated();
 }
 
-// Poll only when LIVE
-const badge = document.getElementById('status-badge');
-function maybePoll() {
-  if (badge.dataset.status === 'LIVE') pollState();
+// Fetch events feed and refresh the event-log list
+async function pollEvents() {
+  const data = await apiFetch(`/api/admin/matches/${MATCH_ID}/event`);
+  if (!data || !Array.isArray(data)) return;
+  const log = document.getElementById('event-log');
+  if (!log) return;
+  log.innerHTML = '';
+  if (data.length === 0) {
+    const p = document.createElement('p');
+    p.className = 'empty-msg';
+    p.textContent = 'Niciun eveniment înregistrat.';
+    log.appendChild(p);
+    return;
+  }
+  data.forEach(e => {
+    const row = document.createElement('div');
+    row.className = 'evt-log-row';
+    row.innerHTML = `<span class="evt-badge">${e.team === 'HOME' ? '🏠' : '✈️'}</span>
+      <span class="evt-type">${e.event_type}</span>
+      ${e.player_name ? `<span class="evt-player">${e.player_name}</span>` : ''}
+      ${e.period ? `<span class="evt-period">Inn.${e.period}</span>` : ''}`;
+    log.appendChild(row);
+  });
 }
-setInterval(maybePoll, 5000);
+
+// Adaptive polling: 2s when LIVE, 5s otherwise
+const badge = document.getElementById('status-badge');
+let _pollTimer = null;
+
+function schedulePoll() {
+  const isLive = badge.dataset.status === 'LIVE';
+  const interval = isLive ? 2000 : 5000;
+  _pollTimer = setTimeout(async () => {
+    if (badge.dataset.status === 'LIVE') {
+      await Promise.all([pollState(), pollEvents()]);
+    }
+    schedulePoll();
+  }, interval);
+}
+
+// Pulse animation for the LIVE badge
+const _badgeStyle = document.createElement('style');
+_badgeStyle.textContent = `
+  @keyframes live-pulse {
+    0%,100% { opacity:1; }
+    50% { opacity:0.55; }
+  }
+  #status-badge[data-status="LIVE"] { animation: live-pulse 1.4s ease-in-out infinite; }
+`;
+document.head.appendChild(_badgeStyle);
+
+schedulePoll();
 </script>
