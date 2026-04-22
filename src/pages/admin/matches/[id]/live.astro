@@ -366,7 +366,7 @@ async function apiFetch(path, opts = {}) {
   return res.json();
 }
 
-async function setStatus(status) {
+window.setStatus = async function(status) {
   await apiFetch(`/api/admin/matches/${MATCH_ID}/status`, {
     method: 'POST', body: JSON.stringify({ status })
   });
@@ -374,9 +374,9 @@ async function setStatus(status) {
     status === 'LIVE' ? '🔴 LIVE' : status === 'FINISHED' ? '✅ Terminat' : '🕐 Programat';
   document.getElementById('status-badge').dataset.status = status;
   pollState();
-}
+};
 
-async function updateInning(inning, half, value) {
+window.updateInning = async function(inning, half, value) {
   const runs = parseInt(value) || 0;
   const data = await apiFetch(`/api/admin/matches/${MATCH_ID}/inning`, {
     method: 'POST', body: JSON.stringify({ inning, half, runs })
@@ -387,9 +387,9 @@ async function updateInning(inning, half, value) {
     document.getElementById('total-home').textContent = data.score_home;
     document.getElementById('total-away').textContent = data.score_away;
   }
-}
+};
 
-async function quickEvent(code, name, points) {
+window.quickEvent = async function(code, name, points) {
   const playerId = document.getElementById('evt-player').value || null;
   const team = document.getElementById('evt-team').value || 'HOME';
   const inning = parseInt(document.getElementById('evt-inning').value) || null;
@@ -398,7 +398,7 @@ async function quickEvent(code, name, points) {
     body: JSON.stringify({ event_type: code, team, player_id: playerId, period: inning, points })
   });
   addEventToLog({ event_type: code, team, player_name: null, period: inning });
-}
+};
 
 function addEventToLog(e) {
   const log = document.getElementById('event-log');
@@ -413,12 +413,12 @@ function addEventToLog(e) {
   log.prepend(row);
 }
 
-function toggleVideoEdit(type) {
+window.toggleVideoEdit = function(type) {
   const el = document.getElementById(`${type}-edit`);
   el.classList.toggle('hidden');
-}
+};
 
-async function saveVideo() {
+window.saveVideo = async function() {
   const ytId = document.getElementById('yt-id')?.value?.trim() || null;
   const veoUrl = document.getElementById('veo-url')?.value?.trim() || null;
   const xbotgoUrl = document.getElementById('xbotgo-url')?.value?.trim() || null;
@@ -428,7 +428,7 @@ async function saveVideo() {
   });
   // Reload to show embed
   window.location.reload();
-}
+};
 
 function setStar(attr, val, btn) {
   evalScores[attr] = val;
