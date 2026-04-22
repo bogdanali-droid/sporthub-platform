@@ -1,4 +1,6 @@
 ---
+import SportHubBanner from '@/components/SportHubBanner.astro';
+
 const user = Astro.locals.user;
 if (user) {
   const { role, sport_code, sport_codes } = user as any;
@@ -157,6 +159,10 @@ if (user) {
     <div class="hero-cta">
       <a href="/login" class="btn-primary">⚡ Intră în platformă</a>
       <a href="/login" class="btn-secondary">🏛️ Portal Federație</a>
+    </div>
+
+    <div style="max-width:1200px;margin:64px auto 0;padding:0 24px">
+      <SportHubBanner href="/login" speed={5} />
     </div>
   </section>
 
