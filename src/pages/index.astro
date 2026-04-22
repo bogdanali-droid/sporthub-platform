@@ -17,11 +17,13 @@ if (user) {
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SportHub România — Platforma multi-sport</title>
+  <link rel="icon" type="image/svg+xml" href="/sporthub-favicon-32.svg" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700;800;900&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: linear-gradient(160deg, #0a1929 0%, #001524 100%);
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: linear-gradient(160deg, #0A2540 0%, #0D3A5F 100%);
       color: #e2e8f0; min-height: 100vh;
     }
     .header {
@@ -42,24 +44,25 @@ if (user) {
     .hero { text-align: center; padding: 80px 24px 60px; }
     .hero-tag {
       display: inline-block;
-      background: rgba(244,180,0,.15); color: #F4B400;
-      border: 1px solid rgba(244,180,0,.3);
+      background: rgba(255,120,73,.15); color: #FF7849;
+      border: 1px solid rgba(255,120,73,.3);
       padding: 4px 14px; border-radius: 20px; font-size: 12px; font-weight: 700;
       letter-spacing: .05em; text-transform: uppercase; margin-bottom: 20px;
     }
     .hero h1 {
+      font-family: 'Space Grotesk', sans-serif;
       font-size: 52px; font-weight: 900; color: #fff; line-height: 1.1; margin-bottom: 20px;
     }
-    .hero h1 span { color: #F4B400; }
+    .hero h1 span { color: #FF7849; }
     .hero p { font-size: 18px; color: #94a3b8; max-width: 560px; margin: 0 auto 36px; line-height: 1.6; }
     .hero-cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
     .btn-primary {
-      background: #F4B400; color: #001524;
+      background: #1976C2; color: #fff;
       padding: 14px 28px; border-radius: 10px; font-size: 15px; font-weight: 700;
       text-decoration: none; transition: transform .15s, box-shadow .15s;
       display: inline-flex; align-items: center; gap: 8px;
     }
-    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(244,180,0,.4); }
+    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(25,118,194,.4); background: #114B7E; }
     .btn-secondary {
       background: rgba(255,255,255,.08); color: #e2e8f0;
       border: 1px solid rgba(255,255,255,.15);
@@ -120,8 +123,7 @@ if (user) {
 <body>
   <header class="header">
     <div class="header-brand">
-      <span class="icon">🏟️</span>
-      <span class="name">SportHub</span>
+      <img src="/sporthub-logo-dark-bg.svg" alt="SportHub" style="height:36px" />
     </div>
     <a href="/login" class="btn-login">Autentificare</a>
   </header>

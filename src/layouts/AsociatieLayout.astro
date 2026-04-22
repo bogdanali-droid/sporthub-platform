@@ -28,6 +28,8 @@ const currentPath = Astro.url.pathname;
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{title} — Portal Asociație</title>
+  <link rel="icon" type="image/svg+xml" href="/sporthub-favicon-32.svg" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     :root {
       --aso-bg: #431407;
@@ -170,10 +172,9 @@ const currentPath = Astro.url.pathname;
 
 <aside id="sidebar">
   <div class="sidebar-logo">
-    <span class="logo-icon">⚾</span>
     <div>
-      <div class="brand-name">{user?.association_name ?? 'Asociație'}</div>
-      <div class="brand-sub">{section}</div>
+      <img src="/sporthub-logo-dark-bg.svg" alt="SportHub" style="height:32px;margin-bottom:4px" />
+      <div class="brand-sub">{user?.association_name ?? section}</div>
     </div>
   </div>
 
