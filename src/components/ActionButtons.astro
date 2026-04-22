@@ -1,0 +1,165 @@
+---
+/**
+ * Reusable action buttons component
+ * Standard button layout for CRUD operations
+ */
+
+interface Action {
+  icon: string;
+  label: string;
+  action: 'edit' | 'view' | 'delete' | 'export' | 'share' | 'duplicate' | 'custom';
+  onClick?: string;
+  href?: string;
+  title?: string;
+  className?: string;
+  variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
+}
+
+interface Props {
+  actions: Action[];
+  size?: 'sm' | 'md' | 'lg';
+}
+
+const { actions, size = 'md' } = Astro.props;
+
+const sizeClasses = {
+  sm: 'btn-sm',
+  md: 'btn-md',
+  lg: 'btn-lg',
+};
+---
+
+<div class={`action-buttons action-buttons--${size}`}>
+  {actions.map((action) => {
+    if (action.href) {
+      return (
+        <a
+          href={action.href}
+          class={`action-btn action-btn--${action.variant || 'secondary'} ${sizeClasses[size]} ${action.className || ''}`}
+          title={action.title || action.label}
+        >
+          <span class="action-icon">{action.icon}</span>
+          <span class="action-label">{action.label}</span>
+        </a>
+      );
+    }
+    return (
+      <button
+        type="button"
+        onclick={action.onClick}
+        class={`action-btn action-btn--${action.variant || 'secondary'} ${sizeClasses[size]} ${action.className || ''}`}
+        title={action.title || action.label}
+      >
+        <span class="action-icon">{action.icon}</span>
+        <span class="action-label">{action.label}</span>
+      </button>
+    );
+  })}
+</div>
+
+<style>
+  .action-buttons {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: none;
+    border-radius: 8px;
+    text-decoration: none;
+    font-family: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+  }
+
+  /* Sizes */
+  .action-buttons--sm .action-btn {
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+
+  .action-buttons--md .action-btn {
+    padding: 8px 16px;
+    font-size: 13px;
+  }
+
+  .action-buttons--lg .action-btn {
+    padding: 10px 20px;
+    font-size: 14px;
+  }
+
+  /* Icon sizing */
+  .action-buttons--sm .action-icon {
+    font-size: 14px;
+  }
+
+  .action-buttons--md .action-icon {
+    font-size: 16px;
+  }
+
+  .action-buttons--lg .action-icon {
+    font-size: 18px;
+  }
+
+  /* Variants */
+  .action-btn--primary {
+    background: #1976c2;
+    color: #fff;
+  }
+
+  .action-btn--primary:hover {
+    background: #1565a0;
+    box-shadow: 0 4px 12px rgba(25, 118, 194, 0.3);
+  }
+
+  .action-btn--secondary {
+    background: #f1f5f9;
+    color: #374151;
+    border: 1.5px solid #e2e8f0;
+  }
+
+  .action-btn--secondary:hover {
+    background: #e2e8f0;
+    border-color: #cbd5e1;
+  }
+
+  .action-btn--danger {
+    background: #fee2e2;
+    color: #991b1b;
+    border: 1.5px solid #fecaca;
+  }
+
+  .action-btn--danger:hover {
+    background: #fecaca;
+    border-color: #fca5a5;
+  }
+
+  .action-btn--ghost {
+    background: transparent;
+    color: #64748b;
+    border: 1px solid transparent;
+  }
+
+  .action-btn--ghost:hover {
+    background: #f8fafc;
+    border-color: #e2e8f0;
+  }
+
+  /* Hide label on small screens for button groups */
+  @media (max-width: 640px) {
+    .action-buttons--sm .action-label {
+      display: none;
+    }
+
+    .action-buttons--md .action-label {
+      display: inline;
+    }
+  }
+</style>
