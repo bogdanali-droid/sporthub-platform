@@ -1,0 +1,210 @@
+---
+/**
+ * Reusable statistics card component
+ * Used for displaying key metrics in dashboards and overview pages
+ */
+
+interface Props {
+  icon?: string;
+  label: string;
+  value: string | number;
+  subtext?: string;
+  trend?: 'up' | 'down' | 'neutral';
+  trendValue?: string;
+  variant?: 'default' | 'success' | 'warning' | 'danger' | 'info';
+  href?: string;
+  className?: string;
+}
+
+const {
+  icon,
+  label,
+  value,
+  subtext,
+  trend,
+  trendValue,
+  variant = 'default',
+  href,
+  className = '',
+} = Astro.props;
+
+const variantClasses = {
+  default: 'stat-card--default',
+  success: 'stat-card--success',
+  warning: 'stat-card--warning',
+  danger: 'stat-card--danger',
+  info: 'stat-card--info',
+};
+
+const trendEmoji = {
+  up: '📈',
+  down: '📉',
+  neutral: '→',
+};
+---
+
+{href ? (
+  <a href={href} class={`stat-card ${variantClasses[variant]} ${className}`}>
+    {icon && <div class="stat-icon">{icon}</div>}
+    <div class="stat-content">
+      <div class="stat-label">{label}</div>
+      <div class="stat-value">{value}</div>
+      {subtext && <div class="stat-subtext">{subtext}</div>}
+    </div>
+    {trend && trendValue && (
+      <div class={`stat-trend stat-trend--${trend}`}>
+        {trendEmoji[trend]} {trendValue}
+      </div>
+    )}
+  </a>
+) : (
+  <div class={`stat-card ${variantClasses[variant]} ${className}`}>
+    {icon && <div class="stat-icon">{icon}</div>}
+    <div class="stat-content">
+      <div class="stat-label">{label}</div>
+      <div class="stat-value">{value}</div>
+      {subtext && <div class="stat-subtext">{subtext}</div>}
+    </div>
+    {trend && trendValue && (
+      <div class={`stat-trend stat-trend--${trend}`}>
+        {trendEmoji[trend]} {trendValue}
+      </div>
+    )}
+  </div>
+)}
+
+<style>
+  .stat-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    padding: 20px;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.07);
+    border-left: 4px solid #e2e8f0;
+    text-decoration: none;
+    color: inherit;
+    transition: all 0.2s ease;
+  }
+
+  .stat-card:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    transform: translateY(-2px);
+  }
+
+  .stat-card a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .stat-icon {
+    font-size: 32px;
+    min-width: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .stat-content {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .stat-label {
+    font-size: 12px;
+    font-weight: 700;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 6px;
+  }
+
+  .stat-value {
+    font-size: 28px;
+    font-weight: 800;
+    color: #1e293b;
+    line-height: 1.2;
+  }
+
+  .stat-subtext {
+    font-size: 12px;
+    color: #94a3b8;
+    margin-top: 4px;
+  }
+
+  .stat-trend {
+    font-size: 12px;
+    font-weight: 700;
+    padding: 4px 8px;
+    border-radius: 6px;
+    white-space: nowrap;
+  }
+
+  .stat-trend--up {
+    color: #16a34a;
+    background: #f0fdf4;
+  }
+
+  .stat-trend--down {
+    color: #dc2626;
+    background: #fef2f2;
+  }
+
+  .stat-trend--neutral {
+    color: #6b7280;
+    background: #f9fafb;
+  }
+
+  /* Color variants */
+  .stat-card--default {
+    border-left-color: #1976c2;
+  }
+
+  .stat-card--success {
+    border-left-color: #16a34a;
+  }
+
+  .stat-card--success .stat-value {
+    color: #16a34a;
+  }
+
+  .stat-card--warning {
+    border-left-color: #f59e0b;
+  }
+
+  .stat-card--warning .stat-value {
+    color: #f59e0b;
+  }
+
+  .stat-card--danger {
+    border-left-color: #dc2626;
+  }
+
+  .stat-card--danger .stat-value {
+    color: #dc2626;
+  }
+
+  .stat-card--info {
+    border-left-color: #0891b2;
+  }
+
+  .stat-card--info .stat-value {
+    color: #0891b2;
+  }
+
+  @media (max-width: 640px) {
+    .stat-card {
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .stat-icon {
+      min-width: auto;
+    }
+
+    .stat-value {
+      font-size: 24px;
+    }
+  }
+</style>

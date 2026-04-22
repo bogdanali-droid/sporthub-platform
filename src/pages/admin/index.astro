@@ -9,98 +9,251 @@ const db   = env?.DB;
 import { queryFirst, queryAll } from '@/lib/db';
 import { getClubSportConfig } from '@/lib/sport-config';
 
-const [sport, stats, upcomingMatches, upcomingTrainings] = await Promise.all([
+const [sport, stats, paymentStats, teamStats, recentMatches, upcomingMatches, upcomingTrainings] = await Promise.all([
   getClubSportConfig(db, user.club_id!),
   queryFirst<any>(db,
     `SELECT
-       (SELECT COUNT(*) FROM players WHERE club_id=? AND status='ACTIVE') AS players,
+       (SELECT COUNT(*) FROM players WHERE club_id=? AND status='ACTIVE') AS players_active,
+       (SELECT COUNT(*) FROM players WHERE club_id=? AND status='INJURED') AS players_injured,
        (SELECT COUNT(*) FROM teams   WHERE club_id=? AND is_active=1)    AS teams,
-       (SELECT COUNT(*) FROM matches WHERE club_id=? AND status='SCHEDULED') AS matches,
-       (SELECT COALESCE(SUM(amount),0) FROM payments WHERE club_id=? AND status='PENDING') AS pending_ron`,
-    [user.club_id, user.club_id, user.club_id, user.club_id]),
+       (SELECT COUNT(*) FROM matches WHERE club_id=? AND status='FINISHED') AS matches_finished,
+       (SELECT COUNT(*) FROM trainings WHERE club_id=? AND status='SCHEDULED') AS trainings_upcoming`,
+    [user.club_id, user.club_id, user.club_id, user.club_id, user.club_id]),
+  queryFirst<any>(db,
+    `SELECT
+       COALESCE(SUM(CASE WHEN status='PENDING' THEN amount ELSE 0 END),0) AS pending_total,
+       COALESCE(SUM(CASE WHEN status='OVERDUE' THEN amount ELSE 0 END),0) AS overdue_total,
+       COALESCE(SUM(CASE WHEN status='PAID' AND strftime('%Y-%m', paid_at) = strftime('%Y-%m', 'now') THEN amount ELSE 0 END),0) AS paid_this_month,
+       COALESCE(COUNT(CASE WHEN status='PAID' ELSE NULL END),0) AS paid_count,
+       COALESCE(COUNT(*),0) AS total_count
+     FROM payments WHERE club_id = ?`,
+    [user.club_id]),
+  queryAll<any>(db,
+    `SELECT t.id, t.name, t.age_group,
+       COUNT(DISTINCT p.id) AS player_count,
+       COALESCE(SUM(CASE WHEN pay.status='PAID' THEN pay.amount ELSE 0 END),0) AS paid_amount,
+       COALESCE(SUM(CASE WHEN pay.status='PENDING' THEN pay.amount ELSE 0 END),0) AS pending_amount
+     FROM teams t
+     LEFT JOIN team_players tp ON tp.team_id = t.id AND tp.left_at IS NULL
+     LEFT JOIN players p ON p.id = tp.player_id
+     LEFT JOIN payments pay ON pay.player_id = p.id AND pay.club_id = t.club_id
+     WHERE t.club_id = ? AND t.is_active = 1
+     GROUP BY t.id
+     ORDER BY t.age_group, t.name`,
+    [user.club_id]),
+  queryAll<any>(db,
+    `SELECT m.*, t.name AS team_name FROM matches m
+     JOIN teams t ON t.id = m.team_id
+     WHERE m.club_id=? AND m.status='FINISHED'
+     ORDER BY m.match_date DESC LIMIT 5`,
+    [user.club_id]),
   queryAll<any>(db,
     `SELECT m.*, t.name AS team_name FROM matches m
      JOIN teams t ON t.id = m.team_id
      WHERE m.club_id=? AND m.status='SCHEDULED' AND m.match_date >= date('now')
-     ORDER BY m.match_date LIMIT 5`,
+     ORDER BY m.match_date LIMIT 4`,
     [user.club_id]),
   queryAll<any>(db,
     `SELECT tr.*, t.name AS team_name FROM trainings tr
      JOIN teams t ON t.id = tr.team_id
      WHERE tr.club_id=? AND tr.status='SCHEDULED' AND tr.start_time >= datetime('now')
-     ORDER BY tr.start_time LIMIT 5`,
+     ORDER BY tr.start_time LIMIT 4`,
     [user.club_id]),
 ]);
+
+// Calculate some metrics
+const totalPlayers = (stats?.players_active ?? 0) + (stats?.players_injured ?? 0);
+const playerAvailability = totalPlayers > 0
+  ? Math.round(((stats?.players_active ?? 0) / totalPlayers) * 100)
+  : 0;
+
+const paymentCompletionRate = (paymentStats?.total_count ?? 0) > 0
+  ? Math.round(((paymentStats?.paid_count ?? 0) / (paymentStats?.total_count ?? 0)) * 100)
+  : 0;
 ---
 
 <AdminLayout title="Dashboard" user={user} sportCode={sport?.code} sportIcon={sport?.icon}>
-  <!-- STAT CARDS -->
+  <!-- MAIN STATS GRID -->
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:24px">
     <div class="stat-card">
       <div class="stat-icon">👥</div>
-      <div class="stat-value">{stats?.players ?? 0}</div>
+      <div class="stat-value">{stats?.players_active ?? 0}</div>
       <div class="stat-label">Jucători activi</div>
+      <div class="stat-sub">{stats?.players_injured ?? 0} accidentați</div>
     </div>
+
     <div class="stat-card">
       <div class="stat-icon">🏆</div>
       <div class="stat-value">{stats?.teams ?? 0}</div>
       <div class="stat-label">Echipe active</div>
     </div>
+
     <div class="stat-card">
       <div class="stat-icon">⚔️</div>
-      <div class="stat-value">{stats?.matches ?? 0}</div>
-      <div class="stat-label">Meciuri planificate</div>
+      <div class="stat-value">{stats?.matches_finished ?? 0}</div>
+      <div class="stat-label">Meciuri disputate</div>
     </div>
+
     <div class="stat-card stat-card--warn">
       <div class="stat-icon">💳</div>
-      <div class="stat-value">{Number(stats?.pending_ron ?? 0).toFixed(0)} RON</div>
-      <div class="stat-label">Plăți restante</div>
+      <div class="stat-value">{paymentCompletionRate}%</div>
+      <div class="stat-label">Plăți încasate</div>
+      <div class="stat-sub">{paymentStats?.paid_count ?? 0} / {paymentStats?.total_count ?? 0}</div>
     </div>
   </div>
 
-  <!-- TWO COLUMNS -->
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
-
-    <!-- UPCOMING TRAININGS -->
-    <div class="panel">
-      <div class="panel-head">
-        <span>🏋️ Antrenamente următoare</span>
-        <a href="/admin/trainings" class="panel-link">Vezi toate</a>
-      </div>
-      {upcomingTrainings.length === 0
-        ? <p class="empty">Niciun antrenament programat.</p>
-        : upcomingTrainings.map(t => (
-          <div class="row-item">
-            <div>
-              <div class="row-title">{t.title}</div>
-              <div class="row-sub">{t.team_name} • {t.location ?? 'Fără locație'}</div>
-            </div>
-            <div class="row-date">{t.start_time?.slice(0,16).replace('T',' ')}</div>
-          </div>
-        ))
-      }
+  <!-- PAYMENT BREAKDOWN -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px">
+    <div class="metric-card metric-card--success">
+      <div class="metric-label">Plătite luna asta</div>
+      <div class="metric-value">{Number(paymentStats?.paid_this_month ?? 0).toLocaleString('ro-RO')} RON</div>
     </div>
 
-    <!-- UPCOMING MATCHES -->
+    <div class="metric-card metric-card--warning">
+      <div class="metric-label">Plăți în așteptare</div>
+      <div class="metric-value">{Number(paymentStats?.pending_total ?? 0).toLocaleString('ro-RO')} RON</div>
+    </div>
+
+    <div class="metric-card metric-card--danger">
+      <div class="metric-label">Plăți restante</div>
+      <div class="metric-value">{Number(paymentStats?.overdue_total ?? 0).toLocaleString('ro-RO')} RON</div>
+    </div>
+
+    <div class="metric-card">
+      <div class="metric-label">Disponibilitate jucători</div>
+      <div class="metric-value">{playerAvailability}%</div>
+    </div>
+  </div>
+
+  <!-- TWO MAIN SECTIONS -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px">
+
+    <!-- UPCOMING ACTIVITIES -->
     <div class="panel">
       <div class="panel-head">
-        <span>⚔️ Meciuri următoare</span>
+        <span>📅 Următoarele activități</span>
+      </div>
+
+      <!-- Trainings -->
+      {upcomingTrainings.length > 0 && (
+        <div style="margin-bottom:16px">
+          <div style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:8px">Antrenamente</div>
+          {upcomingTrainings.map(t => (
+            <div class="activity-row">
+              <div style="display:flex;gap:8px;align-items:center;flex:1">
+                <span style="font-size:20px">🏋️</span>
+                <div>
+                  <div class="activity-title">{t.title}</div>
+                  <div class="activity-sub">{t.team_name}</div>
+                </div>
+              </div>
+              <div class="activity-time">{t.start_time?.slice(0,16).replace('T',' ')}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <!-- Matches -->
+      {upcomingMatches.length > 0 && (
+        <div>
+          <div style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:8px">Meciuri</div>
+          {upcomingMatches.map(m => (
+            <div class="activity-row">
+              <div style="display:flex;gap:8px;align-items:center;flex:1">
+                <span style="font-size:20px">⚔️</span>
+                <div>
+                  <div class="activity-title">{m.team_name} vs {m.opponent_name}</div>
+                  <div class="activity-sub">{m.is_home ? '🏠 Acasă' : '✈️ Deplasare'}</div>
+                </div>
+              </div>
+              <div class="activity-time">{m.match_date?.slice(0,10)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {upcomingMatches.length === 0 && upcomingTrainings.length === 0 && (
+        <p class="empty">Nicio activitate programată.</p>
+      )}
+    </div>
+
+    <!-- RECENT MATCHES -->
+    <div class="panel">
+      <div class="panel-head">
+        <span>🏁 Meciuri recente</span>
         <a href="/admin/matches" class="panel-link">Vezi toate</a>
       </div>
-      {upcomingMatches.length === 0
-        ? <p class="empty">Niciun meci programat.</p>
-        : upcomingMatches.map(m => (
-          <div class="row-item">
-            <div>
-              <div class="row-title">vs {m.opponent_name}</div>
-              <div class="row-sub">{m.team_name} • {m.is_home ? '🏠 Acasă' : '✈️ Deplasare'}</div>
-            </div>
-            <div class="row-date">{m.match_date?.slice(0,10)}</div>
-          </div>
-        ))
+
+      {recentMatches.length === 0
+        ? <p class="empty">Niciun meci disputat încă.</p>
+        : recentMatches.map(m => {
+            const home_score = m.score_home ?? 0;
+            const away_score = m.score_away ?? 0;
+            const home_win = home_score > away_score;
+            const away_win = away_score > home_score;
+            return (
+              <div class="match-row">
+                <div style="flex:1">
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+                    <span class="match-team">{m.team_name}</span>
+                    <span class={`match-score ${home_win ? 'match-score--win' : ''}`}>{home_score}</span>
+                  </div>
+                  <div style="display:flex;align-items:center;justify-content:space-between">
+                    <span class="match-team">{m.opponent_name}</span>
+                    <span class={`match-score ${away_win ? 'match-score--win' : ''}`}>{away_score}</span>
+                  </div>
+                </div>
+                <div style="font-size:11px;color:#94a3b8;text-align:right;min-width:60px">
+                  {m.match_date?.slice(0,10)}<br/>
+                  <span style="font-weight:600;color:#64748b">{m.status === 'FINISHED' ? '✅' : '🕐'}</span>
+                </div>
+              </div>
+            );
+          })
       }
     </div>
 
+  </div>
+
+  <!-- TEAMS OVERVIEW -->
+  {teamStats && teamStats.length > 0 && (
+    <div class="panel">
+      <div class="panel-head">
+        <span>📊 Rezumat echipe</span>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="teams-table">
+          <thead>
+            <tr>
+              <th>Echipă</th>
+              <th style="text-align:right">Jucători</th>
+              <th style="text-align:right">Plătite</th>
+              <th style="text-align:right">Restante</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(teamStats as any[]).map((t: any) => (
+              <tr>
+                <td>
+                  <div style="font-weight:600">{t.age_group ? t.age_group + ' — ' : ''}{t.name}</div>
+                </td>
+                <td style="text-align:right;color:#64748b">{t.player_count}</td>
+                <td style="text-align:right;color:#16a34a;font-weight:600">{Number(t.paid_amount || 0).toLocaleString('ro-RO')} RON</td>
+                <td style="text-align:right;color:#dc2626;font-weight:600">{Number(t.pending_amount || 0).toLocaleString('ro-RO')} RON</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )}
+
+  <!-- QUICK ACTIONS -->
+  <div style="display:flex;gap:12px;margin-top:24px;flex-wrap:wrap">
+    <a href="/admin/players" class="btn btn-primary">+ Adaugă jucător</a>
+    <a href="/admin/matches/new" class="btn btn-primary">+ Programează meci</a>
+    <a href="/admin/trainings/new" class="btn btn-primary">+ Programează antrenament</a>
+    <a href="/admin/payments" class="btn btn-outline">Gestionează plăți</a>
   </div>
 </AdminLayout>
 
@@ -108,11 +261,24 @@ const [sport, stats, upcomingMatches, upcomingTrainings] = await Promise.all([
   .stat-card {
     background: #fff; border-radius: 12px; padding: 20px;
     box-shadow: 0 1px 4px rgba(0,0,0,.07); text-align: center;
+    border-top: 3px solid #e2e8f0;
   }
-  .stat-card--warn { border-top: 3px solid #f59e0b; }
-  .stat-icon { font-size: 28px; margin-bottom: 8px; }
-  .stat-value { font-size: 28px; font-weight: 700; color: #1e293b; }
-  .stat-label { font-size: 13px; color: #64748b; margin-top: 4px; }
+  .stat-card--warn { border-top-color: #f59e0b; }
+  .stat-icon { font-size: 32px; margin-bottom: 8px; }
+  .stat-value { font-size: 32px; font-weight: 800; color: #1e293b; }
+  .stat-label { font-size: 13px; color: #64748b; margin-top: 4px; font-weight: 600; }
+  .stat-sub { font-size: 12px; color: #94a3b8; margin-top: 2px; }
+
+  .metric-card {
+    background: #fff; border-radius: 12px; padding: 16px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.07);
+    border-left: 4px solid #e2e8f0;
+  }
+  .metric-card--success { border-left-color: #16a34a; }
+  .metric-card--warning { border-left-color: #f59e0b; }
+  .metric-card--danger { border-left-color: #dc2626; }
+  .metric-label { font-size: 12px; color: #64748b; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; }
+  .metric-value { font-size: 24px; font-weight: 800; color: #1e293b; margin-top: 6px; }
 
   .panel {
     background: #fff; border-radius: 12px; padding: 20px;
@@ -120,17 +286,52 @@ const [sport, stats, upcomingMatches, upcomingTrainings] = await Promise.all([
   }
   .panel-head {
     display: flex; justify-content: space-between; align-items: center;
-    font-weight: 600; color: #1e293b; margin-bottom: 16px; font-size: 14px;
+    font-weight: 700; color: #1e293b; margin-bottom: 16px; font-size: 14px;
   }
-  .panel-link { font-size: 12px; color: #0f4c81; text-decoration: none; font-weight: 400; }
+  .panel-link { font-size: 12px; color: #0f4c81; text-decoration: none; font-weight: 600; }
   .panel-link:hover { text-decoration: underline; }
-  .row-item {
+
+  .activity-row {
     display: flex; justify-content: space-between; align-items: center;
     padding: 10px 0; border-bottom: 1px solid #f1f5f9;
   }
-  .row-item:last-child { border-bottom: none; }
-  .row-title { font-size: 14px; font-weight: 500; color: #1e293b; }
-  .row-sub { font-size: 12px; color: #64748b; margin-top: 2px; }
-  .row-date { font-size: 12px; color: #94a3b8; white-space: nowrap; margin-left: 12px; }
+  .activity-row:last-child { border-bottom: none; }
+  .activity-title { font-size: 13px; font-weight: 600; color: #1e293b; }
+  .activity-sub { font-size: 12px; color: #64748b; margin-top: 2px; }
+  .activity-time { font-size: 11px; color: #94a3b8; white-space: nowrap; margin-left: 12px; }
+
+  .match-row {
+    display: flex; justify-content: space-between; align-items: stretch;
+    padding: 12px 0; border-bottom: 1px solid #f1f5f9;
+  }
+  .match-row:last-child { border-bottom: none; }
+  .match-team { font-size: 13px; font-weight: 500; color: #374151; }
+  .match-score { font-size: 16px; font-weight: 700; color: #6b7280; }
+  .match-score--win { color: #16a34a; }
+
   .empty { font-size: 13px; color: #94a3b8; padding: 8px 0; }
+
+  .teams-table {
+    width: 100%; border-collapse: collapse;
+  }
+  .teams-table thead { background: #f8fafc; }
+  .teams-table th {
+    padding: 10px; text-align: left; font-size: 12px;
+    font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .teams-table td {
+    padding: 12px 10px; border-bottom: 1px solid #f1f5f9; font-size: 13px;
+  }
+  .teams-table tr:hover { background: #f8fafc; }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 10px 16px; border-radius: 8px; font-size: 13px;
+    font-weight: 600; text-decoration: none; border: none; cursor: pointer;
+    transition: all 0.15s;
+  }
+  .btn-primary { background: #1976c2; color: white; }
+  .btn-primary:hover { background: #1565a0; }
+  .btn-outline { background: white; color: #6b7280; border: 1.5px solid #e5e7eb; }
+  .btn-outline:hover { border-color: #d1d5db; background: #f9fafb; }
 </style>
