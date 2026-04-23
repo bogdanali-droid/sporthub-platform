@@ -2,74 +2,192 @@
 import AdminLayout from '@/layouts/AdminLayout.astro';
 if (!Astro.locals.user) return Astro.redirect('/login');
 const user = Astro.locals.user;
-const env  = (Astro.locals as any).runtime?.env;
-import { queryAll } from '@/lib/db';
+const env = (Astro.locals as any).runtime?.env;
+const db = env.DB;
+import { queryAll, queryFirst } from '@/lib/db';
 import { getClubSportConfig } from '@/lib/sport-config';
 
-const [sport, players, teams] = await Promise.all([
-  getClubSportConfig(env.DB, user.club_id!),
-  queryAll<any>(env.DB,
-    `SELECT p.*, t.name AS team_name FROM players p
-     LEFT JOIN team_players tp ON tp.player_id = p.id AND tp.left_at IS NULL
-     LEFT JOIN teams t ON t.id = tp.team_id
-     WHERE p.club_id = ? ORDER BY p.last_name, p.first_name`,
-    [user.club_id]),
-  queryAll<any>(env.DB,
+const search = Astro.url.searchParams.get('search') || '';
+const teamFilter = Astro.url.searchParams.get('team_id') || '';
+const statusFilter = Astro.url.searchParams.get('status') || '';
+const msg = Astro.url.searchParams.get('msg');
+
+let query = `
+  SELECT p.*, tp.team_id, t.name as team_name,
+    mv.valid_until as medical_valid_until
+  FROM players p
+  LEFT JOIN team_players tp ON tp.player_id = p.id AND tp.left_at IS NULL
+  LEFT JOIN teams t ON t.id = tp.team_id
+  LEFT JOIN (
+    SELECT player_id, MAX(visit_date) as latest_date, valid_until
+    FROM medical_visits GROUP BY player_id
+  ) mv ON mv.player_id = p.id
+  WHERE p.club_id = ?
+`;
+const binds: any[] = [user.club_id];
+
+if (statusFilter) {
+  query += ' AND p.status = ?';
+  binds.push(statusFilter);
+}
+if (teamFilter) {
+  query += ' AND tp.team_id = ?';
+  binds.push(teamFilter);
+}
+if (search) {
+  query += " AND (p.first_name || ' ' || p.last_name LIKE ?)";
+  binds.push(`%${search}%`);
+}
+query += ' ORDER BY p.last_name, p.first_name';
+
+const players = await queryAll<any>(db, query, binds);
+const [sport, teams] = await Promise.all([
+  getClubSportConfig(db, user.club_id!),
+  queryAll<any>(db,
     `SELECT id, name FROM teams WHERE club_id = ? AND is_active = 1 ORDER BY name`,
     [user.club_id]),
 ]);
+
+const azi = new Date().toISOString().split('T')[0];
+const peste30 = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+function medicalStatus(valid_until: string | null): string {
+  if (!valid_until) return 'lipsa';
+  if (valid_until < azi) return 'expirata';
+  if (valid_until <= peste30) return 'expira_curand';
+  return 'ok';
+}
+
+function calcAge(birth_date: string | null): string {
+  if (!birth_date) return '—';
+  const born = new Date(birth_date + 'T00:00:00');
+  const now = new Date();
+  let age = now.getFullYear() - born.getFullYear();
+  const m = now.getMonth() - born.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < born.getDate())) age--;
+  return String(age);
+}
+
+const statusLabels: Record<string, string> = {
+  ACTIVE: 'Activ',
+  INACTIVE: 'Inactiv',
+  INJURED: 'Accidentat',
+  SUSPENDED: 'Suspendat',
+  TRANSFERRED: 'Transferat',
+};
 ---
 
-<AdminLayout title="Jucători" user={user} sportCode={sport?.code} sportIcon={sport?.icon}>
+<AdminLayout title={`Jucători (${players.length})`} user={user} sportCode={sport?.code} sportIcon={sport?.icon}>
+  {msg === 'salvat' && <div class="alert alert-success">Jucătorul a fost salvat.</div>}
+  {msg === 'sters' && <div class="alert alert-success">Jucătorul a fost șters.</div>}
 
-  <div class="toolbar">
-    <input id="search" type="search" placeholder="Caută jucător..." class="search-input" />
-    <button class="btn-primary" onclick="openModal()">+ Jucător nou</button>
+  <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:24px">
+    <form method="GET" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <input name="search" class="form-input" style="width:220px" placeholder="Caută jucător..." value={search} />
+      <select name="team_id" class="form-select" style="width:180px">
+        <option value="">Toate echipele</option>
+        {teams.map((t: any) => (
+          <option value={t.id} selected={teamFilter === String(t.id)}>{t.name}</option>
+        ))}
+      </select>
+      <select name="status" class="form-select" style="width:160px">
+        <option value="">Toate statusurile</option>
+        {Object.entries(statusLabels).map(([val, lbl]) => (
+          <option value={val} selected={statusFilter === val}>{lbl}</option>
+        ))}
+      </select>
+      <button type="submit" class="btn btn-ghost">Filtrează</button>
+      {(search || teamFilter || statusFilter) && <a href="/admin/players" class="btn btn-ghost">✕ Reset</a>}
+    </form>
+    <div style="display:flex;gap:8px">
+      <button onclick="document.getElementById('modal-import').style.display='flex'" class="btn btn-ghost" style="font-size:13px">⬆ Import CSV</button>
+      <button class="btn btn-primary" onclick="openModal()">+ Jucător nou</button>
+    </div>
   </div>
 
-  <div class="table-wrap">
-    <table id="players-table">
+  <!-- Import CSV Modal -->
+  <div id="modal-import" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;align-items:center;justify-content:center;padding:20px">
+    <div class="card" style="width:100%;max-width:520px;padding:28px">
+      <h3 style="font-size:16px;font-weight:700;margin-bottom:8px">Import jucători din CSV</h3>
+      <p style="font-size:13px;color:#6b7280;margin-bottom:16px">
+        Fișierul CSV trebuie să aibă antet cu coloanele:<br/>
+        <code style="background:#f3f4f6;padding:2px 6px;border-radius:4px;font-size:12px">first_name, last_name, birth_date (YYYY-MM-DD), gender (M/F), position, jersey_number, parent_email, status</code>
+      </p>
+      <div class="form-group">
+        <label class="form-label">Fișier CSV *</label>
+        <input type="file" id="import-file" accept=".csv,.txt" class="form-input" style="padding:6px" />
+      </div>
+      <div id="import-result" style="display:none;margin-top:12px;padding:12px;border-radius:8px;font-size:13px"></div>
+      <div style="display:flex;gap:10px;margin-top:16px">
+        <button type="button" onclick="runImport()" class="btn btn-primary" id="import-btn" style="flex:1">Importă</button>
+        <button type="button" onclick="document.getElementById('modal-import').style.display='none'" class="btn btn-ghost">Anulează</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="padding:0;overflow:hidden">
+    <div style="padding:14px 24px;background:#fafafa;border-bottom:1px solid #f3f4f6;font-size:13px;color:#6b7280">
+      {players.length} jucători găsiți
+    </div>
+    <table class="table">
       <thead>
         <tr>
-          <th>Nume</th>
-          <th>Poziție</th>
+          <th>Jucător</th>
           <th>Echipă</th>
+          <th>Vârstă</th>
+          <th>Post</th>
           <th>Status</th>
-          <th>Nr.</th>
-          <th>Acțiuni</th>
+          <th>Viză medicală</th>
+          <th></th>
         </tr>
       </thead>
       <tbody>
-        {players.map(p => (
-          <tr data-search={`${p.first_name} ${p.last_name} ${p.team_name ?? ''}`}>
-            <td>
-              <div class="player-name">
-                <div class="avatar">
+        {players.length === 0 ? (
+          <tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:40px">Niciun jucător găsit.</td></tr>
+        ) : players.map((p: any) => {
+          const ms = medicalStatus(p.medical_valid_until);
+          return (
+            <tr>
+              <td>
+                <div style="display:flex;align-items:center;gap:10px">
                   {p.photo_url
-                    ? <img src={`${p.photo_url}?w=64`} alt={`${p.first_name} ${p.last_name}`} class="avatar-img" />
-                    : <span>{p.first_name?.[0]}{p.last_name?.[0]}</span>
+                    ? <img src={p.photo_url} style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid #f3f4f6;cursor:pointer" alt="" data-lightbox={p.photo_url} data-lightbox-name={`${p.first_name} ${p.last_name}`} />
+                    : <div style="width:36px;height:36px;border-radius:50%;background:#1976C2;display:flex;align-items:center;justify-content:center;color:white;font-weight:900;font-size:13px;flex-shrink:0">{p.first_name?.[0]}{p.last_name?.[0]}</div>
                   }
+                  <div>
+                    <div style="font-weight:700;color:#1e293b">{p.first_name} {p.last_name}</div>
+                    {p.jersey_number && <div style="font-size:12px;color:#9ca3af">#{p.jersey_number}</div>}
+                  </div>
                 </div>
-                <div>
-                  <a href={`/admin/players/${p.id}`} class="fw600 player-link">{p.last_name} {p.first_name}</a>
-                  <div class="text-sm text-gray">{p.birth_date?.slice(0,4)}</div>
-                </div>
-              </div>
-            </td>
-            <td>{p.position ?? '—'}</td>
-            <td>{p.team_name ?? '—'}</td>
-            <td>
-              <span class={`badge badge--${(p.status ?? 'ACTIVE').toLowerCase()}`}>
-                {p.status ?? 'ACTIVE'}
-              </span>
-            </td>
-            <td style="text-align:center">{p.jersey_number ?? '—'}</td>
-            <td>
-              <button class="btn-icon" onclick={`editPlayer('${p.id}')`} title="Editează">✏️</button>
-              <button class="btn-icon" onclick={`deletePlayer('${p.id}','${p.first_name} ${p.last_name}')`} title="Șterge">🗑️</button>
-            </td>
-          </tr>
-        ))}
+              </td>
+              <td>
+                {p.team_name
+                  ? <span class="badge" style="background:#dbeafe;color:#1e40af">{p.team_name}</span>
+                  : <span style="color:#9ca3af">—</span>
+                }
+              </td>
+              <td style="color:#6b7280;font-size:13px">{calcAge(p.birth_date)} ani</td>
+              <td style="color:#6b7280;font-size:13px">{p.position || '—'}</td>
+              <td>
+                {p.status === 'ACTIVE' && <span class="badge" style="background:#dcfce7;color:#166534">Activ</span>}
+                {p.status === 'INACTIVE' && <span class="badge" style="background:#f3f4f6;color:#6b7280">Inactiv</span>}
+                {p.status === 'INJURED' && <span class="badge" style="background:#fef9c3;color:#854d0e">Accidentat</span>}
+                {p.status === 'SUSPENDED' && <span class="badge" style="background:#fee2e2;color:#991b1b">Suspendat</span>}
+                {p.status === 'TRANSFERRED' && <span class="badge" style="background:#ede9fe;color:#5b21b6">Transferat</span>}
+                {!p.status && <span style="color:#9ca3af;font-size:13px">—</span>}
+              </td>
+              <td>
+                {ms === 'ok' && <span class="badge" style="background:#dcfce7;color:#166534">✓ {new Date(p.medical_valid_until + 'T00:00:00').toLocaleDateString('ro-RO')}</span>}
+                {ms === 'expira_curand' && <span class="badge" style="background:#fef9c3;color:#854d0e">⚠ {new Date(p.medical_valid_until + 'T00:00:00').toLocaleDateString('ro-RO')}</span>}
+                {ms === 'expirata' && <span class="badge" style="background:#fee2e2;color:#991b1b">✕ Expirată</span>}
+                {ms === 'lipsa' && <span class="badge" style="background:#fee2e2;color:#991b1b">Lipsă</span>}
+              </td>
+              <td style="text-align:right">
+                <a href={`/admin/players/${p.id}`} class="btn btn-ghost" style="padding:6px 14px;font-size:13px">Profil</a>
+              </td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   </div>
@@ -161,44 +279,33 @@ const [sport, players, teams] = await Promise.all([
 </AdminLayout>
 
 <style>
-  .toolbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; gap:12px; }
-  .search-input { padding:8px 14px; border:1px solid #d1d5db; border-radius:8px; font-size:14px; width:280px; }
-  .table-wrap { background:#fff; border-radius:12px; overflow:auto; box-shadow:0 1px 4px rgba(0,0,0,.07); }
-  table { width:100%; border-collapse:collapse; font-size:14px; }
-  th { text-align:left; padding:12px 16px; border-bottom:2px solid #f1f5f9; color:#64748b; font-weight:600; font-size:12px; text-transform:uppercase; }
-  td { padding:12px 16px; border-bottom:1px solid #f8fafc; }
-  tr:last-child td { border-bottom:none; }
-  .player-name { display:flex; align-items:center; gap:10px; }
-  .avatar { width:36px; height:36px; border-radius:50%; background:#0f4c81; color:#fff; display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:600; flex-shrink:0; overflow:hidden; }
-  .avatar-img { width:36px; height:36px; border-radius:50%; object-fit:cover; display:block; }
-  .fw600 { font-weight:600; color:#1e293b; }
-  .player-link { text-decoration:none; color:#1e293b; }
-  .player-link:hover { color:#1565c0; text-decoration:underline; }
-  .text-sm { font-size:12px; }
-  .text-gray { color:#94a3b8; }
-  .badge { padding:3px 10px; border-radius:20px; font-size:11px; font-weight:600; text-transform:uppercase; }
-  .badge--active { background:#d1fae5; color:#065f46; }
-  .badge--inactive { background:#f1f5f9; color:#64748b; }
-  .badge--injured { background:#fef3c7; color:#92400e; }
-  .badge--suspended { background:#fee2e2; color:#991b1b; }
-  .badge--transferred { background:#ede9fe; color:#5b21b6; }
-  .btn-icon { background:none; border:none; cursor:pointer; font-size:16px; padding:2px 4px; border-radius:4px; }
-  .btn-icon:hover { background:#f1f5f9; }
-  .btn-primary { background:#0f4c81; color:#fff; border:none; padding:9px 18px; border-radius:8px; cursor:pointer; font-size:14px; font-weight:600; font-family:inherit; }
-  .btn-primary:hover { background:#1565c0; }
-  .btn-secondary { background:#f1f5f9; color:#374151; border:none; padding:9px 18px; border-radius:8px; cursor:pointer; font-size:14px; font-weight:600; font-family:inherit; }
-  .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:200; display:flex; align-items:center; justify-content:center; padding:16px; }
-  .modal-overlay.hidden { display:none; }
-  .modal { background:#fff; border-radius:16px; width:100%; max-width:560px; max-height:90vh; overflow-y:auto; }
-  .modal-head { display:flex; justify-content:space-between; align-items:center; padding:20px 24px; border-bottom:1px solid #f1f5f9; }
-  .modal-head h2 { font-size:18px; color:#1e293b; }
-  .btn-close { background:none; border:none; font-size:22px; cursor:pointer; color:#64748b; }
-  .modal-body { padding:24px; }
-  .form-row { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
-  .form-group { margin-bottom:16px; }
-  .form-group label { display:block; font-size:13px; font-weight:500; color:#374151; margin-bottom:6px; }
-  .form-group input, .form-group select { width:100%; padding:9px 12px; border:1px solid #d1d5db; border-radius:8px; font-size:14px; font-family:inherit; }
-  .modal-footer { display:flex; justify-content:flex-end; gap:10px; padding-top:8px; }
+  .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; padding: 20px; box-shadow: 0 1px 4px rgba(0,0,0,.04); }
+  .table { width: 100%; border-collapse: collapse; }
+  .table th {
+    text-align: left; padding: 14px 20px;
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.05em; color: #9ca3af;
+    border-bottom: 2px solid #e5e7eb; background: #f9fafb;
+  }
+  .table td {
+    padding: 18px 20px; font-size: 14.5px;
+    border-bottom: 1px solid #f0f1f3;
+    vertical-align: middle; color: #1e293b;
+  }
+  .table tr:last-child td { border-bottom: none; }
+  .table tr:hover td { background: #f8fafc; }
+  .badge { display: inline-flex; align-items: center; padding: 5px 13px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+  .form-input, .form-select { width: 100%; padding: 12px 16px; border: 1.5px solid #d1d5db; border-radius: 9px; font-size: 14.5px; outline: none; transition: all 0.15s; background: #fff; color: #1e293b; font-family: inherit; box-shadow: inset 0 1px 2px rgba(0,0,0,.04); }
+  .form-input:focus, .form-select:focus { border-color: #1976C2; box-shadow: 0 0 0 3px rgba(25,118,194,.12); }
+  .form-label { display: block; font-size: 13px; font-weight: 700; color: #1e293b; margin-bottom: 8px; letter-spacing: 0.01em; }
+  .form-group { margin-bottom: 24px; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px; border-radius: 9px; font-size: 14px; font-weight: 600; cursor: pointer; text-decoration: none; line-height: 1; transition: all 0.15s; white-space: nowrap; border: 1.5px solid transparent; }
+  .btn-primary { background: #1976C2; color: white; border-color: #1976C2; box-shadow: 0 2px 6px rgba(25,118,194,.35); }
+  .btn-primary:hover { filter: brightness(0.88); box-shadow: 0 3px 10px rgba(25,118,194,.45); }
+  .btn-ghost { background: #fff; color: #6b7280; border-color: #d1d5db; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  .btn-ghost:hover { background: #f8fafc; border-color: #9ca3af; color: #1e293b; }
+  .alert { padding: 16px 20px; border-radius: 10px; font-size: 14px; font-weight: 500; margin-bottom: 24px; }
+  .alert-success { background: #f0fdf4; color: #166534; border: 1.5px solid #bbf7d0; }
 </style>
 
 <script>
@@ -269,4 +376,43 @@ const [sport, players, teams] = await Promise.all([
     if (res.ok) { closeModal(); location.reload(); }
     else { const err = await res.json(); alert(err.error ?? 'Eroare la salvare.'); }
   });
+
+  // CSV Import
+  document.getElementById('modal-import').addEventListener('click', function(e) {
+    if (e.target === this) this.style.display = 'none';
+  });
+
+  async function runImport() {
+    var fileInput = document.getElementById('import-file');
+    var file = fileInput && fileInput.files && fileInput.files[0];
+    if (!file) { alert('Selectează un fișier CSV.'); return; }
+    var btn = document.getElementById('import-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Se importă...'; }
+    var fd = new FormData();
+    fd.append('file', file);
+    try {
+      var res = await fetch('/api/admin/players/import', { method: 'POST', body: fd });
+      var data = await res.json();
+      var el = document.getElementById('import-result');
+      el.style.display = 'block';
+      if (data.imported > 0) {
+        el.style.background = '#f0fdf4';
+        el.style.color = '#166534';
+        el.style.border = '1px solid #bbf7d0';
+        var msg = '✓ ' + data.imported + ' jucători importați cu succes.';
+        if (data.errors && data.errors.length > 0) msg += ' (' + data.errors.length + ' rânduri cu erori)';
+        el.textContent = msg;
+        setTimeout(function() { window.location.reload(); }, 1500);
+      } else {
+        el.style.background = '#fef2f2';
+        el.style.color = '#991b1b';
+        el.style.border = '1px solid #fecaca';
+        el.textContent = 'Eroare la import.';
+      }
+    } catch(e) {
+      alert('Eroare de rețea: ' + e);
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Importă'; }
+    }
+  }
 </script>

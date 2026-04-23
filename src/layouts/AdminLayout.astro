@@ -1,392 +1,963 @@
 ---
-import type { SessionUser } from '@/lib/auth';
-import PortalTopBar from '@/components/PortalTopBar.astro';
-import { getVisiblePortals } from '@/lib/portals';
+interface Props { title: string; }
+const { title } = Astro.props;
+const user = Astro.locals.user;
+const pathname = new URL(Astro.request.url).pathname;
+const db = (Astro.locals as any).runtime?.env?.DB;
+const vapidPublicKey = (Astro.locals as any).runtime?.env?.VAPID_PUBLIC_KEY ?? '';
 
-interface Props {
-  title: string;
-  user?: SessionUser | null;
-  sportCode?: string | null;
-  sportIcon?: string;
+// Load club branding dynamically
+let clubBranding = {
+  name: 'SportHub',
+  logo_url: null as string | null,
+  primary_color: '#1976C2',
+  secondary_color: '#FF7849',
+  sidebar_color: '#0A2540',
+  accent_color: '#FF7849',
+};
+if (user?.club_id && db) {
+  const club = await db.prepare(
+    'SELECT name, logo_url, primary_color, secondary_color, sidebar_color, accent_color FROM clubs WHERE id = ?'
+  ).bind(user.club_id).first() as any;
+  if (club) {
+    clubBranding = {
+      name: club.name || 'SportHub',
+      logo_url: club.logo_url,
+      primary_color: club.primary_color || '#1976C2',
+      secondary_color: club.secondary_color || '#FF7849',
+      sidebar_color: club.sidebar_color || '#0A2540',
+      accent_color: club.accent_color || '#FF7849',
+    };
+  }
 }
 
-const { title, user, sportCode, sportIcon = '🏟️' } = Astro.props;
-const hasPortalBar = user ? getVisiblePortals(user.role).length >= 2 : false;
+// Load user permissions fresh from DB
+let userPerms: { modules?: string[]; all_teams?: boolean; team_ids?: string[] } = {};
+if (user?.id && db) {
+  const permsRow = await db.prepare('SELECT permissions FROM users WHERE id = ?').bind(user.id).first() as any;
+  try { userPerms = JSON.parse(permsRow?.permissions || '{}'); } catch {}
+}
 
-const navItems = [
-  { href: '/admin', icon: '📊', label: 'Dashboard' },
-  { href: '/admin/players', icon: '👥', label: 'Jucători' },
-  { href: '/admin/teams', icon: '🏆', label: 'Echipe' },
-  { href: '/admin/trainings', icon: '🏋️', label: 'Antrenamente' },
-  { href: '/admin/matches', icon: '⚔️', label: 'Meciuri' },
-  { href: '/admin/attendance', icon: '✅', label: 'Prezență' },
-  { href: '/admin/payments', icon: '💳', label: 'Plăți' },
-  { href: '/admin/medical', icon: '🩺', label: 'Medical' },
-  { href: '/admin/documents', icon: '📁', label: 'Documente' },
-  { href: '/admin/evaluations', icon: '⭐', label: 'Evaluări' },
-  { href: '/admin/drills', icon: '🎯', label: 'Drill-uri' },
-  { href: '/admin/federatie', icon: '🏛️', label: 'Federație' },
-  { href: '/admin/competitii', icon: '🥇', label: 'Competiții' },
+// Default modules per role (when no custom permissions set)
+const DEFAULT_MODULES: Record<string, string[]> = {
+  ADMIN:  ['dashboard','players','teams','staff','calendar','trainings','trainingplan','matches','competitii','payments','financiar','medical','injuries','compliance','documents','federatie','suspendari','asociatie','users','profile','settings','settingsdrive','settings2fa','settingssms','reports'],
+  COACH:  ['dashboard','players','calendar','trainings','trainingplan','matches','competitii','medical','injuries','profile','reports'],
+  VIEWER: ['dashboard','players','calendar','trainings','matches','profile'],
+  PARENT: ['dashboard','payments','profile'],
+  PLAYER: ['dashboard','trainings','matches','profile'],
+};
+
+const allowedModules = user?.role === 'ADMIN'
+  ? DEFAULT_MODULES.ADMIN
+  : (userPerms.modules?.length ? userPerms.modules : DEFAULT_MODULES[user?.role || 'VIEWER'] ?? ['dashboard','profile']);
+
+type NavItem = { href: string; label: string; icon: string; key: string };
+type NavGroup = { section: string | null; items: NavItem[] };
+
+const allNavGroups: NavGroup[] = [
+  { section: null, items: [
+    { href: '/admin',                    label: 'Dashboard',          icon: '⊞',  key: 'dashboard' },
+  ]},
+  { section: 'Club', items: [
+    { href: '/admin/players',            label: 'Jucători',           icon: '🏉', key: 'players' },
+    { href: '/admin/staff',              label: 'Staff & Antrenori',  icon: '🧑‍🏫', key: 'staff' },
+    { href: '/admin/teams',              label: 'Echipe',             icon: '👥', key: 'teams' },
+  ]},
+  { section: 'Activitate', items: [
+    { href: '/admin/calendar',           label: 'Calendar',           icon: '🗓️', key: 'calendar' },
+    { href: '/admin/trainings',          label: 'Antrenamente',       icon: '📅', key: 'trainings' },
+    { href: '/admin/training-plan',      label: 'Plan Antrenament',   icon: '📋', key: 'trainingplan' },
+    { href: '/admin/matches',            label: 'Meciuri',            icon: '🏆', key: 'matches' },
+    { href: '/admin/competitii',         label: 'Competiții',         icon: '🥇', key: 'competitii' },
+  ]},
+  { section: 'Monitorizare', items: [
+    { href: '/admin/medical',            label: 'Medical',            icon: '🩺', key: 'medical' },
+    { href: '/admin/medical/injuries',   label: 'Accidentări',        icon: '🤕', key: 'injuries' },
+    { href: '/admin/attendance/raport',  label: 'Prezență & Rapoarte',icon: '📋', key: 'reports' },
+  ]},
+  { section: 'Financiar', items: [
+    { href: '/admin/payments',           label: 'Plăți',              icon: '💰', key: 'payments' },
+    { href: '/admin/financiar',          label: 'Rapoarte financiare',icon: '📊', key: 'financiar' },
+  ]},
+  { section: 'Administrare', items: [
+    { href: '/admin/inscrieri',          label: 'Înregistrări',       icon: '📝', key: 'inscrieri' },
+    { href: '/admin/documents/generate', label: 'Documente',          icon: '📄', key: 'documents' },
+    { href: '/admin/asociatie',            label: 'Asociație regională', icon: '🗺️', key: 'asociatie' },
+    { href: '/admin/federatie',           label: 'Federație FRR',      icon: '🏛️', key: 'federatie' },
+    { href: '/admin/federatie/suspendari', label: 'Suspendări FRR',   icon: '🚫', key: 'suspendari' },
+    { href: '/admin/medical/compliance', label: 'Conformitate FRR',   icon: '📋', key: 'compliance' },
+    { href: '/admin/users',              label: 'Utilizatori',        icon: '🔑', key: 'users' },
+    { href: '/admin/management',         label: 'Analytics',          icon: '📊', key: 'management' },
+  ]},
+  { section: 'Cont', items: [
+    { href: '/admin/profile',            label: 'Profilul meu',       icon: '👤', key: 'profile' },
+    { href: '/admin/settings/club',      label: 'Setări Club',        icon: '🎨', key: 'settings' },
+    { href: '/admin/settings/drive',     label: 'Galerie Drive',      icon: '📷', key: 'settingsdrive' },
+    { href: '/admin/settings/2fa',       label: 'Securitate 2FA',     icon: '🛡️', key: 'settings2fa' },
+    { href: '/admin/settings/sms',       label: 'SMS Reminders',      icon: '💬', key: 'settingssms' },
+  ]},
 ];
 
-const currentPath = Astro.url.pathname;
+const nav = allNavGroups
+  .map(g => ({ ...g, items: g.items.filter(i => allowedModules.includes(i.key)) }))
+  .filter(g => g.items.length > 0);
 ---
-
 <!DOCTYPE html>
 <html lang="ro">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>{title} — SportHub</title>
-  <link rel="icon" type="image/svg+xml" href="/branding/sporthub-favicon.svg" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <style>
+  <script is:inline>
+    // No-FOUC theme init (must run before any CSS/HTML renders)
+    (function() {
+      try {
+        var t = localStorage.getItem('theme');
+        if (t === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+      } catch(e) {}
+    })();
+  </script>
+  <title>{title} — SportHub Admin</title>
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" /><link rel="icon" href="/icons/icon-192.png" sizes="192x192" type="image/png" />
+  <!-- PWA -->
+  <link rel="manifest" href="/manifest.json" />
+  <meta name="theme-color" content="#1976C2" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="SportHub" />
+  <link rel="apple-touch-icon" href="/icons/icon.svg" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <style set:html={`:root { --primary: ${clubBranding.primary_color}; --secondary: ${clubBranding.secondary_color}; --sidebar-bg: ${clubBranding.sidebar_color}; --accent: ${clubBranding.accent_color}; }`}></style>
+  <style is:global>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* ── Dark mode tokens ── */
     :root {
-      --sidebar-bg: #0A2540;
-      --sidebar-text: #cbd5e1;
-      --sidebar-active: #ffffff;
-      --sidebar-accent: #1976C2;
-      --primary: #1976C2;
-      --primary-dark: #114B7E;
-      --secondary: #FF7849;
-      --success: #00C48C;
-      --warning: #FFB020;
-      --danger: #E63946;
-      --topbar-bg: #ffffff;
-      --content-bg: #f1f5f9;
-      --border-color: #e2e8f0;
-      --text-primary: #1e293b;
-      --text-secondary: #475569;
-      --text-light: #64748b;
-      --font-brand: 'Outfit', system-ui, sans-serif;
-      --font-ui: 'Inter', system-ui, sans-serif;
+      --bg-body: #f1f5f9;
+      --bg-card: #ffffff;
+      --bg-card-hover: #f8fafc;
+      --bg-topbar: #ffffff;
+      --bg-input: #ffffff;
+      --bg-table-head: #f9fafb;
+      --bg-table-hover: #f8fafc;
+      --bg-muted: #f3f4f6;
+      --bg-surface-2: #f9fafb;
+      --border-color: #e5e7eb;
+      --border-color-soft: #f0f1f3;
+      --border-input: #d1d5db;
+      --text-primary: #0f172a;
+      --text-secondary: #374151;
+      --text-muted: #6b7280;
+      --text-subtle: #9ca3af;
+      --text-faint: #94a3b8;
+      --shadow-card: 0 1px 4px rgba(0,0,0,0.04);
+      --shadow-elevated: 0 4px 16px rgba(0,0,0,0.08);
+    }
+    :root[data-theme="dark"] {
+      --bg-body: #0b1220;
+      --bg-card: #111a2e;
+      --bg-card-hover: #1a2541;
+      --bg-topbar: #111a2e;
+      --bg-input: #1a2541;
+      --bg-table-head: #172039;
+      --bg-table-hover: #1a2541;
+      --bg-muted: #1a2541;
+      --bg-surface-2: #162037;
+      --border-color: #253050;
+      --border-color-soft: #1d2844;
+      --border-input: #2d3a5c;
+      --text-primary: #f1f5f9;
+      --text-secondary: #cbd5e1;
+      --text-muted: #94a3b8;
+      --text-subtle: #64748b;
+      --text-faint: #475569;
+      --shadow-card: 0 1px 4px rgba(0,0,0,0.3);
+      --shadow-elevated: 0 4px 20px rgba(0,0,0,0.45);
     }
 
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg-body); color: var(--text-primary); min-height: 100vh; transition: background 0.2s, color 0.2s; }
 
-    body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      display: flex; min-height: 100vh; background: var(--content-bg);
-      color: var(--text-primary);
-      line-height: 1.5;
+    /* ── Format orar 24h ── */
+    input[type="time"]::-webkit-datetime-edit-ampm-field { display: none; }
+    input[type="time"] { -webkit-appearance: none; }
+
+    /* ── Overlay mobil ── */
+    .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 49; backdrop-filter: blur(2px); }
+    .sidebar-overlay.open { display: block; }
+
+    /* ── Sidebar ── */
+    .sidebar {
+      position: fixed; top: 0; left: 0; height: 100vh; width: 260px;
+      background: var(--sidebar-bg, #0A2540); display: flex; flex-direction: column;
+      z-index: 50; box-shadow: 4px 0 24px rgba(0,0,0,0.25);
+      transition: transform 0.28s cubic-bezier(0.4,0,0.2,1);
     }
 
-    /* SIDEBAR */
-    #sidebar {
-      width: 260px; height: 100vh; background: var(--sidebar-bg);
-      display: flex; flex-direction: column; position: fixed; top: 0; left: 0; z-index: 100;
-      transition: transform .25s ease;
-      box-shadow: 2px 0 8px rgba(0,0,0,.15);
+    @media (max-width: 768px) {
+      .sidebar { transform: translateX(-100%); }
+      .sidebar.open { transform: translateX(0); }
     }
 
-    .sidebar-logo {
-      padding: 24px 16px; border-bottom: 1px solid rgba(255,255,255,.12);
-      display: flex; align-items: center; gap: 12px; flex-shrink: 0;
+    .sidebar-logo { padding: 28px 24px 24px; border-bottom: 1px solid rgba(240,192,48,0.2); }
+    .sidebar-logo a { display: flex; align-items: center; gap: 12px; text-decoration: none; }
+    .sidebar-logo-title { color: var(--accent, #FF7849); font-weight: 900; font-size: 18px; letter-spacing: 0.3px; line-height: 1.2; }
+    .sidebar-logo-sub { color: rgba(255,255,255,0.45); font-size: 11px; display: block; margin-top: 2px; }
+
+    .nav-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: rgba(255,255,255,0.3); padding: 20px 20px 8px; }
+
+    .nav { flex: 1; overflow-y: auto; padding: 8px 14px 8px; }
+    .nav a {
+      display: flex; align-items: center; gap: 13px;
+      padding: 13px 16px; border-radius: 10px;
+      text-decoration: none; color: rgba(255,255,255,0.8);
+      font-size: 14px; font-weight: 500;
+      margin-bottom: 2px; transition: all 0.15s;
     }
-
-    .sidebar-logo img { height: 40px; }
-    .sidebar-logo .sport-label {
-      color: #94a3b8; font-size: 10px; text-transform: uppercase;
-      letter-spacing: .08em; font-weight: 700; margin-top: 4px;
+    .nav a:hover { background: rgba(255,255,255,0.09); color: white; }
+    .nav a.active {
+      background: rgba(240,192,48,0.14);
+      color: var(--accent, #FF7849);
+      font-weight: 700;
+      box-shadow: inset 3px 0 0 var(--accent, #FF7849);
     }
+    .nav a .icon { font-size: 18px; width: 24px; text-align: center; flex-shrink: 0; }
+    .nav-divider { height: 1px; background: rgba(255,255,255,0.08); margin: 10px 0; }
 
-    nav {
-      flex: 1; padding: 16px 0; overflow-y: auto; min-height: 0;
-      scrollbar-width: thin;
-      scrollbar-color: rgba(255,255,255,.1) transparent;
-    }
-
-    nav::-webkit-scrollbar { width: 6px; }
-    nav::-webkit-scrollbar-track { background: transparent; }
-    nav::-webkit-scrollbar-thumb { background: rgba(255,255,255,.2); border-radius: 3px; }
-
-    .nav-item {
+    .sidebar-footer { padding: 14px 14px 18px; border-top: 1px solid rgba(240,192,48,0.12); }
+    .sidebar-club-name { font-size: 11px; color: rgba(255,255,255,0.3); text-align: center; padding: 8px 0 4px; text-transform: uppercase; letter-spacing: 0.06em; }
+    .user-card {
       display: flex; align-items: center; gap: 12px;
-      padding: 12px 18px; color: var(--sidebar-text);
-      text-decoration: none; font-size: 14px; font-weight: 500;
-      border-radius: 8px; margin: 3px 12px;
-      transition: all .2s ease;
+      padding: 12px 14px; border-radius: 10px; margin-bottom: 6px;
+      text-decoration: none; transition: background 0.15s;
     }
-
-    .nav-item:hover {
-      background: rgba(255,255,255,.1); color: #e2e8f0;
-    }
-
-    .nav-item.active {
-      background: var(--sidebar-accent); color: #fff;
-      font-weight: 600; box-shadow: 0 4px 12px rgba(25,118,194,.3);
-    }
-
-    .nav-icon { width: 20px; text-align: center; font-size: 18px; }
-
-    .sidebar-footer {
-      padding: 16px; border-top: 1px solid rgba(255,255,255,.12);
-      flex-shrink: 0;
-    }
-
-    .sidebar-footer a {
-      color: #94a3b8; font-size: 13px; text-decoration: none;
-      display: block; padding: 8px 0; transition: color .2s;
-    }
-
-    .sidebar-footer a:hover { color: #cbd5e1; }
-
-    /* MAIN */
-    #main {
-      margin-left: 260px; flex: 1; display: flex; flex-direction: column;
-      min-height: 100vh;
-    }
-
-    /* TOPBAR */
-    #topbar {
-      background: var(--topbar-bg); padding: 0 32px; height: 64px;
-      display: flex; align-items: center; justify-content: space-between;
-      border-bottom: 2px solid var(--border-color);
-      position: sticky; top: 0; z-index: 90;
-      box-shadow: 0 2px 4px rgba(0,0,0,.05);
-    }
-
-    .page-title {
-      font-family: var(--font-brand); font-size: 18px; font-weight: 700; color: var(--text-primary);
-      letter-spacing: -.5px;
-    }
-
-    .topbar-right { display: flex; align-items: center; gap: 16px; }
-
-    .user-badge {
+    .user-card:hover { background: rgba(255,255,255,0.06); }
+    .user-avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--primary, #1976C2); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 14px; color: white; flex-shrink: 0; border: 2px solid rgba(240,192,48,0.3); }
+    .user-name { color: white; font-size: 13px; font-weight: 700; }
+    .user-role { color: rgba(255,255,255,0.45); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 1px; }
+    .btn-logout {
       display: flex; align-items: center; gap: 10px;
-      font-size: 13px; color: var(--text-secondary);
-      padding: 8px 12px;
-      background: #f1f5f9;
-      border-radius: 8px;
+      width: 100%; padding: 10px 14px; border-radius: 10px;
+      background: transparent; border: 1px solid rgba(255,255,255,0.12);
+      color: rgba(255,255,255,0.6); font-size: 13px; font-weight: 500;
+      cursor: pointer; transition: all 0.15s; font-family: inherit;
+      text-align: left;
     }
+    .btn-logout:hover { background: rgba(220,38,38,0.15); border-color: rgba(220,38,38,0.3); color: #fca5a5; }
 
-    .user-avatar {
-      width: 36px; height: 36px; border-radius: 50%;
-      background: var(--primary); color: #fff;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 14px; font-weight: 700;
-    }
-
-    /* CONTENT */
-    #content {
-      flex: 1; padding: 32px 40px;
-      max-width: 1600px;
-    }
-
-    /* Portal bar offset */
-    body.has-portal-bar { padding-top: 40px; }
-    body.has-portal-bar #sidebar { top: 40px; height: calc(100vh - 40px); }
-    body.has-portal-bar #topbar { top: 40px; }
-
-    /* BUTTONS */
-    .btn {
-      display: inline-flex; align-items: center; justify-content: center;
-      gap: 8px; padding: 12px 24px; border-radius: 8px;
-      font-size: 14px; font-weight: 600; cursor: pointer;
-      border: none; text-decoration: none;
-      transition: all .2s ease;
-      white-space: nowrap;
-    }
-
-    .btn:hover { transform: translateY(-2px); box-shadow: 0 8px 16px rgba(0,0,0,.1); }
-    .btn:active { transform: translateY(0); }
-
-    .btn-primary {
-      background: var(--primary); color: #fff;
-    }
-
-    .btn-primary:hover { background: var(--primary-dark); }
-    .btn-secondary {
-      background: #f1f5f9; color: var(--text-primary);
-      border: 2px solid var(--border-color);
-    }
-    .btn-secondary:hover { background: #e2e8f0; }
-    .btn-danger { background: var(--danger); color: #fff; }
-    .btn-danger:hover { background: #dc2626; }
-    .btn-success { background: var(--success); color: #fff; }
-    .btn-success:hover { background: #059669; }
-    .btn-sm { padding: 8px 16px; font-size: 13px; }
-    .btn-lg { padding: 14px 32px; font-size: 15px; }
-
-    /* CARDS */
-    .card {
-      background: #fff; border-radius: 12px;
-      box-shadow: 0 1px 3px rgba(0,0,0,.08);
-      padding: 28px; margin-bottom: 24px;
-      border: 1px solid var(--border-color);
-    }
-
-    .card-header {
+    /* ── Main ── */
+    .main { margin-left: 260px; min-height: 100vh; }
+    .topbar {
+      background: var(--bg-topbar); border-bottom: 1px solid var(--border-color);
+      padding: 0 36px; height: 68px;
       display: flex; align-items: center; justify-content: space-between;
-      margin-bottom: 24px; padding-bottom: 16px;
-      border-bottom: 1px solid var(--border-color);
+      position: sticky; top: 0; z-index: 40;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+      transition: background 0.2s, border-color 0.2s;
     }
-
-    .card-title { font-family: var(--font-brand); font-size: 16px; font-weight: 700; color: var(--text-primary); }
-
-    /* FORMS */
-    .form-group { margin-bottom: 24px; }
-    .form-label {
-      display: block; font-size: 13px; font-weight: 700;
-      color: var(--text-primary); margin-bottom: 8px;
-      text-transform: uppercase; letter-spacing: .05em;
-    }
-
-    .form-input, .form-select, .form-textarea {
-      width: 100%; padding: 12px 16px; border: 2px solid var(--border-color);
-      border-radius: 8px; font-size: 14px; outline: none;
-      transition: all .2s;
-      font-family: inherit;
-      background: #fff;
-    }
-
-    .form-input:focus, .form-select:focus, .form-textarea:focus {
-      border-color: var(--primary);
-      box-shadow: 0 0 0 3px rgba(25,118,194,.1);
-      background: #fff;
-    }
-
-    .form-input::placeholder { color: var(--text-light); }
-
-    /* TABLES */
-    .table {
-      width: 100%; border-collapse: collapse; font-size: 13px;
-      background: #fff;
-    }
-
-    .table th {
-      padding: 14px 16px; text-align: left; font-size: 12px;
-      font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
-      color: var(--text-secondary); border-bottom: 2px solid var(--border-color);
-      background: #f8fafc;
-    }
-
-    .table td {
-      padding: 14px 16px; border-bottom: 1px solid var(--border-color);
-      color: var(--text-primary);
-    }
-
-    .table tr:hover td { background: #f8fafc; }
-
-    /* BADGES */
-    .badge {
+    .topbar h1 { font-size: 21px; font-weight: 800; color: var(--text-primary); }
+    .content { padding: 36px; }
+    .menu-btn { display: none; background: none; border: none; cursor: pointer; padding: 8px; border-radius: 8px; color: var(--text-secondary); transition: background 0.15s; }
+    .menu-btn:hover { background: var(--bg-muted); }
+    .theme-toggle { background: none; border: 1px solid var(--border-color); cursor: pointer; padding: 8px 10px; border-radius: 10px; color: var(--text-secondary); transition: all 0.15s; font-size: 16px; line-height: 1; display: flex; align-items: center; justify-content: center; }
+    .theme-toggle:hover { background: var(--bg-muted); border-color: var(--text-subtle); }
+    .topbar-user { display: flex; align-items: center; gap: 10px; }
+    .topbar-user-name { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+    .topbar-user-role { font-size: 11px; color: var(--text-subtle); text-transform: uppercase; letter-spacing: 0.04em; }
+    .topbar-avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--primary, #1976C2); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px; color: white; flex-shrink: 0; }
+    .topbar-logout {
       display: inline-flex; align-items: center; gap: 6px;
-      padding: 4px 12px; border-radius: 8px;
-      font-size: 12px; font-weight: 700;
+      padding: 7px 14px; border-radius: 8px; font-size: 13px; font-weight: 500;
+      background: var(--bg-card); color: var(--text-muted); border: 1px solid var(--border-color);
+      cursor: pointer; text-decoration: none; transition: all 0.15s; font-family: inherit;
+    }
+    .topbar-logout:hover { background: #fef2f2; color: #991b1b; border-color: #fecaca; }
+    :root[data-theme="dark"] .topbar-logout:hover { background: #3b0f0f; color: #fca5a5; border-color: #7f1d1d; }
+
+    @media (max-width: 768px) {
+      .main { margin-left: 0; }
+      .topbar { padding: 0 16px; }
+      .content { padding: 16px; }
+      .menu-btn { display: flex; align-items: center; justify-content: center; }
+      .topbar-user-name, .topbar-user-role { display: none; }
+    }
+    @media (max-width: 640px) {
+      .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      .card { padding: 16px !important; border-radius: 10px; }
+    }
+    @media (max-width: 768px) {
+      table.table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      [id^="modal-"] > div {
+        max-height: 95vh !important; overflow-y: auto;
+        margin: 8px !important; width: calc(100% - 16px) !important;
+        border-radius: 12px !important;
+      }
+      .table td .btn { padding: 7px 12px; font-size: 13px; }
+      .topbar h1 { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: calc(100vw - 160px); }
+    }
+    @media (max-width: 480px) {
+      .content { padding: 12px !important; }
+      .btn { padding: 9px 14px; font-size: 13px; }
     }
 
+    /* ── Buttons ── */
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 10px 20px; border-radius: 9px; font-size: 14px; font-weight: 600;
+      cursor: pointer; text-decoration: none; line-height: 1;
+      transition: all 0.15s; white-space: nowrap; border: 1.5px solid transparent;
+    }
+    .btn-primary {
+      background: var(--primary, #1976C2); color: white; border-color: var(--primary, #1976C2);
+      box-shadow: 0 2px 6px rgba(139,26,26,0.35);
+    }
+    .btn-primary:hover { filter: brightness(0.88); box-shadow: 0 3px 10px rgba(139,26,26,0.45); }
+    .btn-gold { background: var(--accent, #FF7849); color: #1a0000; border-color: var(--accent, #FF7849); font-weight: 700; }
+    .btn-gold:hover { filter: brightness(0.88); }
+    .btn-ghost {
+      background: var(--bg-card); color: var(--text-secondary);
+      border-color: var(--border-input);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    .btn-ghost:hover { background: var(--bg-card-hover); border-color: var(--text-subtle); color: var(--text-primary); }
+    .btn-danger {
+      background: var(--bg-card); color: #c41c1c;
+      border-color: #f5a5a5;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    }
+    .btn-danger:hover { background: #fff0f0; border-color: #dc2626; }
+    :root[data-theme="dark"] .btn-danger { color: #fca5a5; border-color: #7f1d1d; }
+    :root[data-theme="dark"] .btn-danger:hover { background: #3b0f0f; border-color: #dc2626; }
+
+    /* ── Cards ── */
+    .card { background: var(--bg-card); border-radius: 14px; border: 1px solid var(--border-color); padding: 20px; box-shadow: var(--shadow-card); transition: background 0.2s, border-color 0.2s; }
+
+    /* ── Stat cards ── */
+    .stat-card { background: var(--bg-card); border-radius: 14px; border: 1px solid var(--border-color); padding: 20px; box-shadow: var(--shadow-card); transition: background 0.2s, border-color 0.2s; }
+
+    /* ── Tables ── */
+    .table { width: 100%; border-collapse: collapse; }
+    .table th {
+      text-align: left; padding: 14px 20px;
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.05em; color: var(--text-subtle);
+      border-bottom: 2px solid var(--border-color); background: var(--bg-table-head);
+    }
+    .table td {
+      padding: 18px 20px; font-size: 14.5px;
+      border-bottom: 1px solid var(--border-color-soft);
+      vertical-align: middle; color: var(--text-primary);
+    }
+    .table tr:last-child td { border-bottom: none; }
+    .table tr:hover td { background: var(--bg-table-hover); }
+
+    /* ── Badges ── */
+    .badge { display: inline-flex; align-items: center; padding: 5px 13px; border-radius: 999px; font-size: 12px; font-weight: 700; }
     .badge-green { background: #dcfce7; color: #166534; }
-    .badge-yellow { background: #fef9c3; color: #854d0e; }
     .badge-red { background: #fee2e2; color: #991b1b; }
-    .badge-blue { background: #dbeafe; color: #1d4ed8; }
-    .badge-gray { background: #f1f5f9; color: #475569; }
+    .badge-blue { background: #dbeafe; color: #1e40af; }
+    .badge-yellow { background: #fef9c3; color: #854d0e; }
+    .badge-gray { background: var(--bg-muted); color: var(--text-secondary); }
+    :root[data-theme="dark"] .badge-green { background: #052e1a; color: #4ade80; }
+    :root[data-theme="dark"] .badge-red { background: #3b0f0f; color: #fca5a5; }
+    :root[data-theme="dark"] .badge-blue { background: #0c1e3f; color: #93c5fd; }
+    :root[data-theme="dark"] .badge-yellow { background: #3b2600; color: #fcd34d; }
 
-    /* STATS */
-    .stat-card {
-      background: #fff; border-radius: 12px; padding: 28px;
-      box-shadow: 0 1px 3px rgba(0,0,0,.08);
-      border: 1px solid var(--border-color);
+    /* ── Forms ── */
+    .form-group { margin-bottom: 24px; }
+    .form-label { display: block; font-size: 13px; font-weight: 700; color: var(--text-primary); margin-bottom: 8px; letter-spacing: 0.01em; }
+    .form-input {
+      width: 100%; padding: 12px 16px;
+      border: 1.5px solid var(--border-input); border-radius: 9px;
+      font-size: 14.5px; outline: none; transition: all 0.15s;
+      background: var(--bg-input); color: var(--text-primary); font-family: inherit;
+      box-shadow: inset 0 1px 2px rgba(0,0,0,0.04);
     }
-
-    .stat-value { font-family: var(--font-brand); font-size: 32px; font-weight: 800; color: var(--primary); margin-bottom: 8px; }
-    .stat-label { font-size: 12px; color: var(--text-light); text-transform: uppercase; letter-spacing: .05em; }
-
-    /* ALERTS */
-    .alert { padding: 12px 16px; border-radius: 8px; font-size: 13.5px; margin-bottom: 16px; }
-    .alert-info { background: #eff6ff; border: 1px solid #bfdbfe; color: #1d4ed8; }
-    .alert-warning { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
-    .alert-success { background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; }
-    .alert-error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
-
-    /* MODALS */
-    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 200; align-items: center; justify-content: center; padding: 20px; }
-    .modal-overlay.open { display: flex; }
-    .modal { background: #fff; border-radius: 12px; width: 100%; max-width: 520px; max-height: 90vh; overflow-y: auto; }
-    .modal-header { display: flex; align-items: center; justify-content: space-between; padding: 18px 24px; border-bottom: 1px solid #f1f5f9; }
-    .modal-title { font-size: 16px; font-weight: 600; color: #1e293b; }
-    .modal-close { background: none; border: none; font-size: 20px; cursor: pointer; color: #64748b; }
-    .modal-body { padding: 20px 24px; }
-    .modal-footer { padding: 16px 24px; border-top: 1px solid #f1f5f9; display: flex; justify-content: flex-end; gap: 8px; }
-
-    /* Mobile */
-    #menu-toggle {
-      display: none; background: none; border: none;
-      font-size: 24px; cursor: pointer; color: var(--text-primary);
-      padding: 8px 12px;
+    .form-input:focus { border-color: var(--primary, #1976C2); box-shadow: 0 0 0 3px rgba(139,26,26,0.12); }
+    .form-textarea {
+      width: 100%; padding: 12px 16px;
+      border: 1.5px solid var(--border-input); border-radius: 9px;
+      font-size: 14.5px; outline: none; transition: all 0.15s;
+      resize: vertical; font-family: inherit; line-height: 1.7;
+      min-height: 120px; color: var(--text-primary); background: var(--bg-input);
+      box-shadow: inset 0 1px 2px rgba(0,0,0,0.04);
     }
-
-    #sidebar-overlay {
-      display: none; position: fixed; inset: 0;
-      background: rgba(0,0,0,.6); z-index: 99;
+    .form-textarea:focus { border-color: var(--primary, #1976C2); box-shadow: 0 0 0 3px rgba(139,26,26,0.12); }
+    .form-select {
+      width: 100%; padding: 12px 16px;
+      border: 1.5px solid var(--border-input); border-radius: 9px;
+      font-size: 14.5px; outline: none; transition: all 0.15s;
+      background: var(--bg-input); color: var(--text-primary); font-family: inherit;
+      box-shadow: inset 0 1px 2px rgba(0,0,0,0.04);
+      cursor: pointer;
     }
+    .form-select:focus { border-color: var(--primary, #1976C2); box-shadow: 0 0 0 3px rgba(139,26,26,0.12); }
 
-    @media (max-width: 900px) {
-      #sidebar { transform: translateX(-100%); }
-      #sidebar.open { transform: translateX(0); }
-      #sidebar.open + #sidebar-overlay { display: block; }
-      #main { margin-left: 0; }
-      #menu-toggle { display: block; }
-      #content { padding: 20px 24px; }
-      body.has-portal-bar #sidebar { top: 40px; height: calc(100vh - 40px); }
+    /* ── Alerts ── */
+    .alert { padding: 16px 20px; border-radius: 10px; font-size: 14px; font-weight: 500; margin-bottom: 24px; }
+    .alert-error { background: #fef2f2; color: #991b1b; border: 1.5px solid #fecaca; }
+    .alert-success { background: #f0fdf4; color: #166534; border: 1.5px solid #bbf7d0; }
+    :root[data-theme="dark"] .alert-error { background: #3b0f0f; color: #fca5a5; border-color: #7f1d1d; }
+    :root[data-theme="dark"] .alert-success { background: #052e1a; color: #4ade80; border-color: #14532d; }
+
+    /* ── Dark mode: patch hardcoded inline styles ── */
+    :root[data-theme="dark"] body { background: var(--bg-body) !important; color: var(--text-primary) !important; }
+    :root[data-theme="dark"] .content { color: var(--text-primary); }
+    /* White/light backgrounds → dark card */
+    :root[data-theme="dark"] .content [style*="background:white"],
+    :root[data-theme="dark"] .content [style*="background: white"],
+    :root[data-theme="dark"] .content [style*="background-color:white"],
+    :root[data-theme="dark"] .content [style*="background-color: white"],
+    :root[data-theme="dark"] .content [style*="background:#fff"],
+    :root[data-theme="dark"] .content [style*="background: #fff"],
+    :root[data-theme="dark"] .content [style*="background:#ffffff"],
+    :root[data-theme="dark"] .content [style*="background: #ffffff"],
+    :root[data-theme="dark"] .content [style*="background:#f9fafb"],
+    :root[data-theme="dark"] .content [style*="background:#f8fafc"],
+    :root[data-theme="dark"] .content [style*="background:#f3f4f6"],
+    :root[data-theme="dark"] .content [style*="background:#f1f5f9"],
+    :root[data-theme="dark"] .content [style*="background:#fafafa"],
+    :root[data-theme="dark"] .content [style*="background: #fafafa"] { background: var(--bg-card) !important; }
+    /* Dark text → light text */
+    :root[data-theme="dark"] .content [style*="color:#111827"],
+    :root[data-theme="dark"] .content [style*="color: #111827"],
+    :root[data-theme="dark"] .content [style*="color:#1f2937"],
+    :root[data-theme="dark"] .content [style*="color: #1f2937"],
+    :root[data-theme="dark"] .content [style*="color:#374151"],
+    :root[data-theme="dark"] .content [style*="color: #374151"],
+    :root[data-theme="dark"] .content [style*="color:#0f172a"],
+    :root[data-theme="dark"] .content [style*="color: #0f172a"],
+    :root[data-theme="dark"] .content [style*="color:#6b7280"],
+    :root[data-theme="dark"] .content [style*="color:#4b5563"],
+    :root[data-theme="dark"] .content [style*="color:#000000"],
+    :root[data-theme="dark"] .content [style*="color:#000"],
+    :root[data-theme="dark"] .content [style*="color:#1C0808"],
+    :root[data-theme="dark"] .content [style*="color:#1c0808"],
+    :root[data-theme="dark"] .content [style*="color:#0A2540"],
+    :root[data-theme="dark"] .content [style*="color:#3f3f46"],
+    :root[data-theme="dark"] .content [style*="color:#27272a"] { color: var(--text-primary) !important; }
+    /* Border colors */
+    :root[data-theme="dark"] .content [style*="border-color:#e5e7eb"],
+    :root[data-theme="dark"] .content [style*="border-color:#d1d5db"],
+    :root[data-theme="dark"] .content [style*="border:1px solid #e5e7eb"],
+    :root[data-theme="dark"] .content [style*="border: 1px solid #e5e7eb"],
+    :root[data-theme="dark"] .content [style*="border:1.5px solid #e5e7eb"],
+    :root[data-theme="dark"] .content [style*="border: 1.5px solid #e5e7eb"],
+    :root[data-theme="dark"] .content [style*="border-bottom:1px solid #f0f1f3"],
+    :root[data-theme="dark"] .content [style*="border-bottom:1px solid #f9fafb"],
+    :root[data-theme="dark"] .content [style*="border-bottom:1px solid #e5e7eb"] { border-color: var(--border-color) !important; }
+    /* Tables in dark mode */
+    :root[data-theme="dark"] .content table { background: var(--bg-card) !important; }
+    :root[data-theme="dark"] .content th { background: var(--bg-table-head) !important; color: var(--text-subtle) !important; }
+    :root[data-theme="dark"] .content td { color: var(--text-primary) !important; border-color: var(--border-color-soft) !important; }
+    /* Headers and text in dark mode */
+    :root[data-theme="dark"] .content h1,
+    :root[data-theme="dark"] .content h2,
+    :root[data-theme="dark"] .content h3,
+    :root[data-theme="dark"] .content h4 { color: var(--text-primary) !important; }
+    :root[data-theme="dark"] .topbar h1 { color: var(--text-primary) !important; }
+    /* Keep intentional status colors intact */
+    :root[data-theme="dark"] .content [style*="color:#dc2626"],
+    :root[data-theme="dark"] .content [style*="color:#16a34a"],
+    :root[data-theme="dark"] .content [style*="color:#d97706"],
+    :root[data-theme="dark"] .content [style*="color:#2563eb"],
+    :root[data-theme="dark"] .content [style*="color:#FF7849"],
+    :root[data-theme="dark"] .content [style*="color:#f0c030"] { color: inherit; }
+
+    /* ── Bottom Tab Bar (mobile only) ── */
+    .bottom-nav {
+      display: none;
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      background: var(--bg-topbar);
+      border-top: 1.5px solid var(--border-color);
+      z-index: 9999;
+      padding-bottom: env(safe-area-inset-bottom, 0px);
+      box-shadow: 0 -4px 20px rgba(0,0,0,0.12);
     }
+    @media (max-width: 768px) {
+      .bottom-nav { display: flex !important; }
+      .content { padding-bottom: 88px !important; }
+      body { background: var(--bg-body); }
+    }
+    .bn-item {
+      flex: 1; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      padding: 8px 2px 6px; gap: 3px;
+      text-decoration: none; color: var(--text-subtle);
+      font-size: 10px; font-weight: 600; letter-spacing: 0.02em;
+      transition: color 0.15s; cursor: pointer;
+      border: none; background: none; font-family: inherit;
+      -webkit-tap-highlight-color: transparent;
+      min-width: 0;
+    }
+    .bn-item.active { color: var(--primary, #1976C2); }
+    .bn-item .bn-icon { width: 24px; height: 24px; display: block; flex-shrink: 0; }
+    .bn-item.active .bn-icon { transform: scale(1.1); transition: transform 0.15s; }
+    .bn-label { font-size: 10px; line-height: 1; white-space: nowrap; }
+
+    /* ── Photo Lightbox ── */
+    #photo-lightbox.open { display: flex !important; animation: lb-in 0.18s ease; }
+    @keyframes lb-in { from { opacity:0; } to { opacity:1; } }
+    #photo-lightbox img { animation: lb-scale 0.2s cubic-bezier(0.34,1.56,0.64,1); }
+    @keyframes lb-scale { from { transform:scale(0.7); } to { transform:scale(1); } }
+    /* Clickable photo thumbnails */
+    [data-lightbox] { cursor: zoom-in; transition: transform 0.15s, box-shadow 0.15s !important; }
+    [data-lightbox]:hover { transform: scale(1.08) !important; box-shadow: 0 4px 20px rgba(0,0,0,0.25) !important; }
   </style>
 </head>
-<body class={hasPortalBar ? 'has-portal-bar' : ''}>
+<body>
+  <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
 
-<PortalTopBar user={user ?? null} />
-
-<aside id="sidebar">
-  <div class="sidebar-logo">
-    <div>
-      <img src="/branding/sporthub-logo-white.svg" alt="SportHub" />
-      <div class="sport-label">{sportCode ?? 'Admin'}</div>
-    </div>
-  </div>
-
-  <nav>
-    {navItems.map(item => (
-      <a
-        href={item.href}
-        class={`nav-item${currentPath === item.href || (item.href !== '/admin' && currentPath.startsWith(item.href)) ? ' active' : ''}`}
-      >
-        <span class="nav-icon">{item.icon}</span>
-        {item.label}
-      </a>
-    ))}
-  </nav>
-
-  <div class="sidebar-footer">
-    <a href="/admin/settings">⚙️ Setări club</a>
-    <a href="/api/auth/logout">🚪 Deconectare</a>
-  </div>
-</aside>
-
-<div id="sidebar-overlay" onclick="document.getElementById('sidebar').classList.remove('open')"></div>
-
-<div id="main">
-  <header id="topbar">
-    <div style="display:flex;align-items:center;gap:12px">
-      <button id="menu-toggle" onclick="document.getElementById('sidebar').classList.toggle('open')">☰</button>
-      <span class="page-title">{title}</span>
-    </div>
-    <div class="topbar-right">
-      {user && (
-        <div class="user-badge">
-          <div class="user-avatar">
-            {(user.first_name?.[0] ?? user.email[0]).toUpperCase()}
-          </div>
-          <span>{user.first_name ?? user.email}</span>
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+      <a href="/admin">
+        {clubBranding.logo_url
+          ? <img src={clubBranding.logo_url} alt={clubBranding.name} style="height:40px;width:40px;object-fit:contain;border-radius:8px;flex-shrink:0" />
+          : <span style="font-size:28px;line-height:1;flex-shrink:0">🏉</span>
+        }
+        <div>
+          <span class="sidebar-logo-title">{clubBranding.name}</span>
+          <small class="sidebar-logo-sub">Panou administrare</small>
         </div>
-      )}
+      </a>
     </div>
-  </header>
 
-  <main id="content">
-    <slot />
+    <nav class="nav">
+      {nav.map(group => (
+        <div>
+          {group.section && <div class="nav-label">{group.section}</div>}
+          {group.items.map(item => (
+            <a
+              href={item.href}
+              class={pathname === item.href || (item.href !== '/admin' && pathname.startsWith(item.href)) ? 'active' : ''}
+            >
+              <span class="icon">{item.icon}</span>
+              {item.label}
+            </a>
+          ))}
+        </div>
+      ))}
+      <div class="nav-divider"></div>
+      <a href="/" target="_blank" rel="noopener">
+        <span class="icon">↗</span>
+        Vezi site-ul
+      </a>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="user-card">
+        <div class="user-avatar">
+          {user?.first_name?.[0]?.toUpperCase()}{user?.last_name?.[0]?.toUpperCase()}
+        </div>
+        <div>
+          <div class="user-name">{user?.first_name} {user?.last_name}</div>
+          <div class="user-role">{user?.role}</div>
+        </div>
+      </div>
+      <form method="POST" action="/api/auth/logout">
+        <button type="submit" class="btn-logout">
+          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75"/>
+          </svg>
+          Deconectare
+        </button>
+      </form>
+      <div class="sidebar-club-name">{clubBranding.name}</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div style="display:flex;align-items:center;gap:12px">
+        <button class="menu-btn" id="menu-btn" onclick="openSidebar()" aria-label="Meniu">
+          <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"/>
+          </svg>
+        </button>
+        <h1>{title}</h1>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <!-- Push notification bell -->
+        <button id="push-bell" class="theme-toggle" aria-label="Notificări push" title="Activează notificări push"
+          style="position:relative;display:none">
+          <svg id="push-bell-icon" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+            <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+          </svg>
+          <span id="push-dot" style="display:none;position:absolute;top:4px;right:4px;width:8px;height:8px;background:#16a34a;border-radius:50%;border:2px solid var(--bg-topbar)"></span>
+        </button>
+        <button id="theme-toggle" class="theme-toggle" onclick="toggleTheme()" aria-label="Schimbă tema" title="Schimbă tema">
+          <span id="theme-icon">🌙</span>
+        </button>
+        <div class="topbar-user">
+          <div class="topbar-avatar">
+            {user?.first_name?.[0]?.toUpperCase()}{user?.last_name?.[0]?.toUpperCase()}
+          </div>
+          <div>
+            <div class="topbar-user-name">{user?.first_name} {user?.last_name}</div>
+            <div class="topbar-user-role">{user?.role}</div>
+          </div>
+        </div>
+        <form method="POST" action="/api/auth/logout" style="margin:0">
+          <button type="submit" class="topbar-logout">
+            <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75"/>
+            </svg>
+            Ieșire
+          </button>
+        </form>
+      </div>
+    </div>
+    <div class="content">
+      <slot />
+    </div>
   </main>
-</div>
 
+  <!-- Photo Lightbox — global, triggered by data-lightbox attribute -->
+  <div id="photo-lightbox" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.88);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);align-items:center;justify-content:center;cursor:zoom-out" onclick="closeLightbox()">
+    <div style="position:relative;max-width:min(380px,90vw);max-height:min(380px,80vh)" onclick="event.stopPropagation()">
+      <img id="photo-lightbox-img" src="" alt="" style="width:100%;height:100%;object-fit:contain;border-radius:16px;box-shadow:0 24px 80px rgba(0,0,0,0.7);display:block" />
+      <div id="photo-lightbox-name" style="margin-top:12px;text-align:center;color:white;font-weight:700;font-size:16px;letter-spacing:0.01em"></div>
+      <button onclick="closeLightbox()" style="position:absolute;top:-12px;right:-12px;width:32px;height:32px;border-radius:50%;background:rgba(255,255,255,0.15);border:none;color:white;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)">×</button>
+    </div>
+  </div>
+
+  <!-- Bottom Tab Bar — fixed, always visible on mobile -->
+  <nav class="bottom-nav" id="bottom-nav">
+    <a href="/admin" class={`bn-item${pathname === '/admin' ? ' active' : ''}`}>
+      <svg class="bn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+        <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+      </svg>
+      <span class="bn-label">Acasă</span>
+    </a>
+    <a href="/admin/players" class={`bn-item${pathname.startsWith('/admin/players') ? ' active' : ''}`}>
+      <svg class="bn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="7" r="4"/><path d="M5.5 21a8.38 8.38 0 0 1 13 0"/>
+      </svg>
+      <span class="bn-label">Jucători</span>
+    </a>
+    <a href="/admin/matches" class={`bn-item${pathname.startsWith('/admin/matches') ? ' active' : ''}`}>
+      <svg class="bn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/>
+        <path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/>
+        <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/>
+        <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>
+      </svg>
+      <span class="bn-label">Meciuri</span>
+    </a>
+    <a href="/admin/payments" class={`bn-item${pathname.startsWith('/admin/payments') ? ' active' : ''}`}>
+      <svg class="bn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="2" y="5" width="20" height="14" rx="2"/>
+        <path d="M2 10h20"/>
+      </svg>
+      <span class="bn-label">Plăți</span>
+    </a>
+    <button class="bn-item" onclick="openSidebar()">
+      <svg class="bn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+      </svg>
+      <span class="bn-label">Meniu</span>
+    </button>
+  </nav>
+<script>
+  function openSidebar() {
+    document.getElementById('sidebar')!.classList.add('open');
+    document.getElementById('sidebar-overlay')!.classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+  function closeSidebar() {
+    document.getElementById('sidebar')!.classList.remove('open');
+    document.getElementById('sidebar-overlay')!.classList.remove('open');
+    document.body.style.overflow = '';
+  }
+  window.addEventListener('resize', () => {
+    if (window.innerWidth > 768) closeSidebar();
+  });
+  let touchStartX = 0;
+  document.getElementById('sidebar')!.addEventListener('touchstart', (e) => { touchStartX = e.touches[0].clientX; });
+  document.getElementById('sidebar')!.addEventListener('touchend', (e) => {
+    if (touchStartX - e.changedTouches[0].clientX > 60) closeSidebar();
+  });
+  (window as any).openSidebar = openSidebar;
+  (window as any).closeSidebar = closeSidebar;
+
+  // ── Photo Lightbox ──
+  function openLightbox(src: string, name?: string) {
+    const lb = document.getElementById('photo-lightbox')!;
+    const img = document.getElementById('photo-lightbox-img') as HTMLImageElement;
+    const nameEl = document.getElementById('photo-lightbox-name')!;
+    img.src = src;
+    nameEl.textContent = name || '';
+    lb.classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+  function closeLightbox() {
+    const lb = document.getElementById('photo-lightbox')!;
+    lb.classList.remove('open');
+    document.body.style.overflow = '';
+    setTimeout(() => { (document.getElementById('photo-lightbox-img') as HTMLImageElement).src = ''; }, 200);
+  }
+  // Close on Escape key
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeLightbox(); });
+  // Handle all [data-lightbox] clicks (works for dynamically added elements too)
+  document.addEventListener('click', (e) => {
+    const el = (e.target as HTMLElement).closest('[data-lightbox]') as HTMLElement | null;
+    if (el) openLightbox(el.dataset.lightbox!, el.dataset.lightboxName);
+  });
+  (window as any).openLightbox = openLightbox;
+  (window as any).closeLightbox = closeLightbox;
+
+  // ── Dark mode toggle ──
+  // Patches inline styles that hardcode light colors
+  function patchInlineDark(isDark: boolean) {
+    const LIGHT_BG = ['background:white','background: white','background-color:white','background-color: white',
+      'background:#fff','background: #fff','background:#ffffff','background: #ffffff',
+      'background:#f9fafb','background:#f8fafc','background:#f3f4f6','background:#f1f5f9','background:#f4f5f7',
+      'background:#fafafa','background: #fafafa','background-color:#fff','background-color:#ffffff',
+      'background:#fef2f2','background:#eff6ff','background:#f0fdf4','background:#fef9ee','background:#f5f3ff',
+      'background:#ecfeff','background:#fef3c7','background:#fafaf9'];
+    const DARK_TEXT = ['color:#111827','color: #111827','color:#1f2937','color: #1f2937',
+      'color:#374151','color: #374151','color:#0f172a','color: #0f172a',
+      'color:#6b7280','color: #6b7280','color:#4b5563','color: #4b5563',
+      'color:#000000','color:#000','color:#1C0808','color: #1C0808',
+      'color:#1c0808','color: #1c0808','color:#0A2540','color: #0A2540',
+      'color:#3f3f46','color: #3f3f46','color:#27272a','color: #27272a'];
+    const LIGHT_BORDER = ['border-bottom:1px solid #f0f1f3','border-bottom:1px solid #f9fafb',
+      'border-bottom:1px solid #e5e7eb','border:1.5px solid #e5e7eb','border:1px solid #e5e7eb',
+      'border-color:#e5e7eb','border-color:#d1d5db','border-color:#f0f1f3'];
+
+    document.querySelectorAll('[style]').forEach(el => {
+      const h = el as HTMLElement;
+      const s = h.getAttribute('style') || '';
+      if (isDark) {
+        if (LIGHT_BG.some(p => s.includes(p))) {
+          h.style.setProperty('background', 'var(--bg-card)', 'important');
+        }
+        if (DARK_TEXT.some(p => s.includes(p))) {
+          h.style.setProperty('color', 'var(--text-primary)', 'important');
+        }
+        if (LIGHT_BORDER.some(p => s.includes(p))) {
+          h.style.setProperty('border-color', 'var(--border-color)', 'important');
+        }
+      } else {
+        // Restore: remove !important overrides (let inline styles take back over)
+        if (h.style.getPropertyPriority('background') === 'important') h.style.removeProperty('background');
+        if (h.style.getPropertyPriority('color') === 'important') h.style.removeProperty('color');
+        if (h.style.getPropertyPriority('border-color') === 'important') h.style.removeProperty('border-color');
+      }
+    });
+  }
+
+  function applyTheme(theme: string) {
+    document.documentElement.setAttribute('data-theme', theme);
+    const icon = document.getElementById('theme-icon');
+    if (icon) icon.textContent = theme === 'dark' ? '☀️' : '🌙';
+    const meta = document.querySelector('meta[name="theme-color"]') as HTMLMetaElement | null;
+    if (meta) meta.content = theme === 'dark' ? '#0b1220' : '#1976C2';
+    patchInlineDark(theme === 'dark');
+  }
+  function toggleTheme() {
+    const current = document.documentElement.getAttribute('data-theme') || 'light';
+    const next = current === 'dark' ? 'light' : 'dark';
+    localStorage.setItem('theme', next);
+    applyTheme(next);
+  }
+  (window as any).toggleTheme = toggleTheme;
+  // Restore on load (head inline script already applied dark mode to avoid FOUC)
+  const saved = localStorage.getItem('theme');
+  if (saved === 'dark' || saved === 'light') applyTheme(saved);
+</script>
+<script>
+  // Register service worker
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js', { scope: '/' })
+        .then(reg => console.log('SW registered:', reg.scope))
+        .catch(err => console.log('SW registration failed:', err));
+    });
+  }
+
+  // PWA install prompt — once per session; permanent only if installed
+  // Migrate old pwa-dismissed key (no longer used)
+  if (localStorage.getItem('pwa-dismissed') && !localStorage.getItem('pwa-installed')) {
+    localStorage.removeItem('pwa-dismissed');
+  }
+  let deferredPrompt: any;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    const shownThisSession = sessionStorage.getItem('pwa-shown');
+    const alreadyInstalled = localStorage.getItem('pwa-installed');
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
+    if (!shownThisSession && !alreadyInstalled && !isStandalone) {
+      sessionStorage.setItem('pwa-shown', '1');
+      setTimeout(showInstallBanner, 3000);
+    }
+  });
+
+  function showInstallBanner() {
+    if (document.getElementById('pwa-banner')) return;
+    const banner = document.createElement('div');
+    banner.id = 'pwa-banner';
+    banner.innerHTML = `
+      <div style="position:fixed;bottom:70px;left:50%;transform:translateX(-50%);background:#1C0808;border:1px solid #FF7849;border-radius:14px;padding:14px 20px;display:flex;align-items:center;gap:14px;z-index:9999;box-shadow:0 8px 32px rgba(0,0,0,0.4);max-width:340px;width:calc(100% - 40px)">
+        <span style="font-size:28px">🏉</span>
+        <div style="flex:1">
+          <div style="color:white;font-weight:700;font-size:14px">Instalează SportHub</div>
+          <div style="color:#9ca3af;font-size:12px">Acces rapid de pe ecranul principal</div>
+        </div>
+        <button onclick="installPWA()" style="background:#1976C2;color:white;border:none;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:700;cursor:pointer">Instalează</button>
+        <button onclick="dismissPWA()" style="background:none;border:none;color:#6b7280;font-size:18px;cursor:pointer;padding:4px">×</button>
+      </div>
+    `;
+    document.body.appendChild(banner);
+  }
+
+  function dismissPWA() {
+    // dismissed this session — will re-appear next session
+    document.getElementById('pwa-banner')?.remove();
+  }
+
+  async function installPWA() {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    deferredPrompt = null;
+    if (outcome === 'accepted') {
+      localStorage.setItem('pwa-installed', '1');
+    }
+    document.getElementById('pwa-banner')?.remove();
+  }
+
+  (window as any).installPWA = installPWA;
+  (window as any).dismissPWA = dismissPWA;
+</script>
+
+<!-- Push notification subscription -->
+<script define:vars={{ vapidPublicKey }}>
+(function() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !vapidPublicKey) return;
+
+  const bell = document.getElementById('push-bell');
+  const dot  = document.getElementById('push-dot');
+  if (!bell) return;
+
+  bell.style.display = 'flex';
+
+  function urlB64ToUint8(b64) {
+    const pad = '='.repeat((4 - b64.length % 4) % 4);
+    const raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+    return Uint8Array.from(raw, c => c.charCodeAt(0));
+  }
+
+  async function getRegistration() {
+    const regs = await navigator.serviceWorker.getRegistrations();
+    return regs.find(r => r.active) ?? await navigator.serviceWorker.ready;
+  }
+
+  async function checkStatus() {
+    const perm = Notification.permission;
+    if (perm === 'granted') {
+      const reg  = await getRegistration();
+      const sub  = await reg.pushManager.getSubscription();
+      if (sub) {
+        dot.style.display = 'block';
+        bell.title = 'Notificări push: ACTIVE — click pentru a dezactiva';
+        return;
+      }
+    }
+    dot.style.display = 'none';
+    bell.title = 'Activează notificările push';
+  }
+
+  async function subscribe() {
+    const reg = await getRegistration();
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlB64ToUint8(vapidPublicKey),
+    });
+    const json = sub.toJSON();
+    await fetch('/api/admin/push/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ endpoint: json.endpoint, keys: json.keys }),
+    });
+    dot.style.display = 'block';
+    bell.title = 'Notificări push: ACTIVE — click pentru a dezactiva';
+  }
+
+  async function unsubscribe() {
+    const reg = await getRegistration();
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) {
+      await fetch('/api/admin/push/subscribe', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint: sub.endpoint }),
+      });
+      await sub.unsubscribe();
+    }
+    dot.style.display = 'none';
+    bell.title = 'Activează notificările push';
+  }
+
+  bell.addEventListener('click', async () => {
+    bell.disabled = true;
+    try {
+      const reg = await getRegistration();
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) {
+        await unsubscribe();
+      } else {
+        const perm = await Notification.requestPermission();
+        if (perm === 'granted') {
+          await subscribe();
+        } else {
+          alert('Notificările au fost blocate în browser. Activează-le din setările browserului.');
+        }
+      }
+    } catch(e) {
+      console.error('Push error:', e);
+    } finally {
+      bell.disabled = false;
+    }
+  });
+
+  checkStatus();
+})();
+</script>
+
+<!-- Cookie Consent Banner -->
+<div id="cookie-banner" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:9999;background:#1C0808;border-top:2px solid #FF7849;padding:14px 24px;box-shadow:0 -4px 20px rgba(0,0,0,0.3)">
+  <div style="max-width:900px;margin:0 auto;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+    <p style="color:rgba(255,255,255,0.85);font-size:13px;line-height:1.5;flex:1;margin:0">
+      Folosim cookie-uri pentru autentificare și funcționalitatea platformei.
+      Prin continuarea utilizării, ești de acord cu
+      <a href="/politica-cookie" style="color:#FF7849;text-decoration:underline">Politica Cookie</a> și
+      <a href="/gdpr" style="color:#FF7849;text-decoration:underline">Politica GDPR</a>.
+    </p>
+    <div style="display:flex;gap:8px;flex-shrink:0">
+      <button id="cookie-decline" style="background:none;border:1px solid rgba(255,255,255,0.3);color:rgba(255,255,255,0.7);font-size:13px;font-weight:600;padding:7px 16px;border-radius:6px;cursor:pointer">Refuz</button>
+      <button id="cookie-accept" style="background:#FF7849;border:none;color:#1C0808;font-size:13px;font-weight:800;padding:7px 18px;border-radius:6px;cursor:pointer">Sunt de acord</button>
+    </div>
+  </div>
+</div>
+<script is:inline>
+(function() {
+  var consent = localStorage.getItem('cookie-consent');
+  var banner = document.getElementById('cookie-banner');
+  if (!consent && banner) banner.style.display = 'block';
+  var btnA = document.getElementById('cookie-accept');
+  var btnD = document.getElementById('cookie-decline');
+  if (btnA) btnA.addEventListener('click', function() {
+    localStorage.setItem('cookie-consent', 'accepted');
+    if (banner) banner.style.display = 'none';
+  });
+  if (btnD) btnD.addEventListener('click', function() {
+    localStorage.setItem('cookie-consent', 'declined');
+    if (banner) banner.style.display = 'none';
+  });
+})();
+</script>
 </body>
 </html>
