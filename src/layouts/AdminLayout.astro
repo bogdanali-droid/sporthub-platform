@@ -1,106 +1,74 @@
 ---
-interface Props { title: string; }
-const { title } = Astro.props;
-const user = Astro.locals.user;
+import type { SessionUser } from '@/lib/auth';
+import PortalTopBar from '@/components/PortalTopBar.astro';
+import { getVisiblePortals } from '@/lib/portals';
+
+interface Props {
+  title: string;
+  user?: SessionUser | null;
+  sportCode?: string | null;
+  sportIcon?: string;
+}
+
+const { title, user: propUser, sportCode, sportIcon = '🏟️' } = Astro.props;
+const user = propUser ?? Astro.locals.user;
+const hasPortalBar = user ? getVisiblePortals(user.role).length >= 2 : false;
 const pathname = new URL(Astro.request.url).pathname;
 const db = (Astro.locals as any).runtime?.env?.DB;
 const vapidPublicKey = (Astro.locals as any).runtime?.env?.VAPID_PUBLIC_KEY ?? '';
 
-// Load club branding dynamically
+// Load club branding from DB (all columns exist in schema)
 let clubBranding = {
   name: 'SportHub',
   logo_url: null as string | null,
   primary_color: '#1976C2',
-  secondary_color: '#FF7849',
   sidebar_color: '#0A2540',
   accent_color: '#FF7849',
 };
 if (user?.club_id && db) {
-  const club = await db.prepare(
-    'SELECT name, logo_url, primary_color, secondary_color, sidebar_color, accent_color FROM clubs WHERE id = ?'
-  ).bind(user.club_id).first() as any;
-  if (club) {
-    clubBranding = {
-      name: club.name || 'SportHub',
-      logo_url: club.logo_url,
-      primary_color: club.primary_color || '#1976C2',
-      secondary_color: club.secondary_color || '#FF7849',
-      sidebar_color: club.sidebar_color || '#0A2540',
-      accent_color: club.accent_color || '#FF7849',
-    };
-  }
+  try {
+    const club = await db.prepare(
+      'SELECT name, logo_url, primary_color, sidebar_color, accent_color FROM clubs WHERE id = ?'
+    ).bind(user.club_id).first() as any;
+    if (club) {
+      clubBranding = {
+        name: club.name || 'SportHub',
+        logo_url: club.logo_url,
+        primary_color: club.primary_color || '#1976C2',
+        sidebar_color: club.sidebar_color || '#0A2540',
+        accent_color: club.accent_color || '#FF7849',
+      };
+    }
+  } catch { /* use defaults */ }
 }
-
-// Load user permissions fresh from DB
-let userPerms: { modules?: string[]; all_teams?: boolean; team_ids?: string[] } = {};
-if (user?.id && db) {
-  const permsRow = await db.prepare('SELECT permissions FROM users WHERE id = ?').bind(user.id).first() as any;
-  try { userPerms = JSON.parse(permsRow?.permissions || '{}'); } catch {}
-}
-
-// Default modules per role (when no custom permissions set)
-const DEFAULT_MODULES: Record<string, string[]> = {
-  ADMIN:  ['dashboard','players','teams','staff','calendar','trainings','trainingplan','matches','competitii','payments','financiar','medical','injuries','compliance','documents','federatie','suspendari','asociatie','users','profile','settings','settingsdrive','settings2fa','settingssms','reports'],
-  COACH:  ['dashboard','players','calendar','trainings','trainingplan','matches','competitii','medical','injuries','profile','reports'],
-  VIEWER: ['dashboard','players','calendar','trainings','matches','profile'],
-  PARENT: ['dashboard','payments','profile'],
-  PLAYER: ['dashboard','trainings','matches','profile'],
-};
-
-const allowedModules = user?.role === 'ADMIN'
-  ? DEFAULT_MODULES.ADMIN
-  : (userPerms.modules?.length ? userPerms.modules : DEFAULT_MODULES[user?.role || 'VIEWER'] ?? ['dashboard','profile']);
 
 type NavItem = { href: string; label: string; icon: string; key: string };
 type NavGroup = { section: string | null; items: NavItem[] };
 
-const allNavGroups: NavGroup[] = [
+const nav: NavGroup[] = [
   { section: null, items: [
-    { href: '/admin',                    label: 'Dashboard',          icon: '⊞',  key: 'dashboard' },
+    { href: '/admin', label: 'Dashboard', icon: '⊞', key: 'dashboard' },
   ]},
   { section: 'Club', items: [
-    { href: '/admin/players',            label: 'Jucători',           icon: '🏉', key: 'players' },
-    { href: '/admin/staff',              label: 'Staff & Antrenori',  icon: '🧑‍🏫', key: 'staff' },
-    { href: '/admin/teams',              label: 'Echipe',             icon: '👥', key: 'teams' },
+    { href: '/admin/players', label: 'Jucători', icon: '👥', key: 'players' },
+    { href: '/admin/teams', label: 'Echipe', icon: '🏆', key: 'teams' },
   ]},
   { section: 'Activitate', items: [
-    { href: '/admin/calendar',           label: 'Calendar',           icon: '🗓️', key: 'calendar' },
-    { href: '/admin/trainings',          label: 'Antrenamente',       icon: '📅', key: 'trainings' },
-    { href: '/admin/training-plan',      label: 'Plan Antrenament',   icon: '📋', key: 'trainingplan' },
-    { href: '/admin/matches',            label: 'Meciuri',            icon: '🏆', key: 'matches' },
-    { href: '/admin/competitii',         label: 'Competiții',         icon: '🥇', key: 'competitii' },
+    { href: '/admin/trainings', label: 'Antrenamente', icon: '📅', key: 'trainings' },
+    { href: '/admin/matches', label: 'Meciuri', icon: '⚔️', key: 'matches' },
+    { href: '/admin/attendance', label: 'Prezență', icon: '✅', key: 'attendance' },
   ]},
-  { section: 'Monitorizare', items: [
-    { href: '/admin/medical',            label: 'Medical',            icon: '🩺', key: 'medical' },
-    { href: '/admin/medical/injuries',   label: 'Accidentări',        icon: '🤕', key: 'injuries' },
-    { href: '/admin/attendance/raport',  label: 'Prezență & Rapoarte',icon: '📋', key: 'reports' },
+  { section: 'Resurse', items: [
+    { href: '/admin/payments', label: 'Plăți', icon: '💳', key: 'payments' },
+    { href: '/admin/medical', label: 'Medical', icon: '🩺', key: 'medical' },
+    { href: '/admin/documents', label: 'Documente', icon: '📁', key: 'documents' },
+    { href: '/admin/evaluations', label: 'Evaluări', icon: '⭐', key: 'evaluations' },
   ]},
-  { section: 'Financiar', items: [
-    { href: '/admin/payments',           label: 'Plăți',              icon: '💰', key: 'payments' },
-    { href: '/admin/financiar',          label: 'Rapoarte financiare',icon: '📊', key: 'financiar' },
-  ]},
-  { section: 'Administrare', items: [
-    { href: '/admin/inscrieri',          label: 'Înregistrări',       icon: '📝', key: 'inscrieri' },
-    { href: '/admin/documents/generate', label: 'Documente',          icon: '📄', key: 'documents' },
-    { href: '/admin/asociatie',            label: 'Asociație regională', icon: '🗺️', key: 'asociatie' },
-    { href: '/admin/federatie',           label: 'Federație FRR',      icon: '🏛️', key: 'federatie' },
-    { href: '/admin/federatie/suspendari', label: 'Suspendări FRR',   icon: '🚫', key: 'suspendari' },
-    { href: '/admin/medical/compliance', label: 'Conformitate FRR',   icon: '📋', key: 'compliance' },
-    { href: '/admin/users',              label: 'Utilizatori',        icon: '🔑', key: 'users' },
-    { href: '/admin/management',         label: 'Analytics',          icon: '📊', key: 'management' },
-  ]},
-  { section: 'Cont', items: [
-    { href: '/admin/profile',            label: 'Profilul meu',       icon: '👤', key: 'profile' },
-    { href: '/admin/settings/club',      label: 'Setări Club',        icon: '🎨', key: 'settings' },
-    { href: '/admin/settings/drive',     label: 'Galerie Drive',      icon: '📷', key: 'settingsdrive' },
-    { href: '/admin/settings/2fa',       label: 'Securitate 2FA',     icon: '🛡️', key: 'settings2fa' },
-    { href: '/admin/settings/sms',       label: 'SMS Reminders',      icon: '💬', key: 'settingssms' },
+  { section: 'Organizație', items: [
+    { href: '/admin/federatie', label: 'Federație', icon: '🏛️', key: 'federatie' },
+    { href: '/admin/competitii', label: 'Competiții', icon: '🥇', key: 'competitii' },
   ]},
 ];
-
-const nav = allNavGroups
-  .map(g => ({ ...g, items: g.items.filter(i => allowedModules.includes(i.key)) }))
-  .filter(g => g.items.length > 0);
 ---
 <!DOCTYPE html>
 <html lang="ro">
@@ -512,7 +480,7 @@ const nav = allNavGroups
       <a href="/admin">
         {clubBranding.logo_url
           ? <img src={clubBranding.logo_url} alt={clubBranding.name} style="height:40px;width:40px;object-fit:contain;border-radius:8px;flex-shrink:0" />
-          : <span style="font-size:28px;line-height:1;flex-shrink:0">🏉</span>
+          : <span style="font-size:28px;line-height:1;flex-shrink:0">{sportIcon}</span>
         }
         <div>
           <span class="sidebar-logo-title">{clubBranding.name}</span>
@@ -801,7 +769,7 @@ const nav = allNavGroups
     banner.id = 'pwa-banner';
     banner.innerHTML = `
       <div style="position:fixed;bottom:70px;left:50%;transform:translateX(-50%);background:#1C0808;border:1px solid #FF7849;border-radius:14px;padding:14px 20px;display:flex;align-items:center;gap:14px;z-index:9999;box-shadow:0 8px 32px rgba(0,0,0,0.4);max-width:340px;width:calc(100% - 40px)">
-        <span style="font-size:28px">🏉</span>
+        <span style="font-size:28px">🏟️</span>
         <div style="flex:1">
           <div style="color:white;font-weight:700;font-size:14px">Instalează SportHub</div>
           <div style="color:#9ca3af;font-size:12px">Acces rapid de pe ecranul principal</div>
