@@ -14,62 +14,72 @@ try {
   visits = await queryAll<any>(db,
     `SELECT mv.*, p.first_name, p.last_name
      FROM medical_visits mv JOIN players p ON p.id=mv.player_id
-     WHERE mv.club_id=? ORDER BY mv.visit_date DESC LIMIT 100`,
+     WHERE mv.club_id=? ORDER BY mv.valid_until ASC, mv.visit_date DESC LIMIT 200`,
     [clubId]);
 } catch (e) {
   console.error('Medical visits load error:', e);
 }
 
 const today = new Date().toISOString().slice(0,10);
+const in30 = new Date(Date.now() + 30*24*3600*1000).toISOString().slice(0,10);
 const expired = visits.filter((v: any) => v.valid_until && v.valid_until < today).length;
-const expiringSoon = visits.filter((v: any) => {
-  if (!v.valid_until) return false;
-  const diff = (new Date(v.valid_until).getTime() - Date.now()) / 86400000;
-  return diff >= 0 && diff <= 30;
-}).length;
+const expiringSoon = visits.filter((v: any) => v.valid_until && v.valid_until >= today && v.valid_until <= in30).length;
 ---
-<AdminLayout title="Medical">
+<AdminLayout title="Medical" user={user}>
   <div style="margin-bottom:20px">
     <h2 style="font-size:20px;font-weight:800">Medical</h2>
-    <p style="color:#6b7280;font-size:13px">Vi\u0219ite medicale \u0219i avize sportive</p>
+    <p style="color:#6b7280;font-size:13px">Vizite medicale și avize sportive</p>
   </div>
 
   {expired > 0 && (
     <div class="alert alert-error" style="margin-bottom:16px">
-      \u26a0\ufe0f {expired} juc\u0103tor(i) cu aviz medical expirat!
+      ⚠️ {expired} jucător(i) cu aviz medical expirat!
     </div>
   )}
   {expiringSoon > 0 && (
     <div class="alert alert-warning" style="margin-bottom:16px">
-      \u23f0 {expiringSoon} juc\u0103tor(i) cu aviz ce expir\u0103 \u00een urm\u0103toarele 30 zile.
+      ⏰ {expiringSoon} jucător(i) cu aviz ce expiră în următoarele 30 zile.
     </div>
   )}
 
   <div class="card" style="padding:0;overflow:hidden">
     {visits.length === 0 ? (
       <div style="padding:60px 24px;text-align:center;color:#9ca3af">
-        <div style="font-size:40px;margin-bottom:12px">\ud83e\ude7a</div>
-        <p style="font-weight:600">Nicio vi\u0219it\u0103 medical\u0103 \u00eenregistrat\u0103</p>
+        <div style="font-size:40px;margin-bottom:12px">🩺</div>
+        <p style="font-weight:600">Nicio vizită medicală înregistrată</p>
+        <p style="font-size:13px;margin-top:6px">Adaugă vizite medicale din profilul fiecărui jucător → tab Medical</p>
       </div>
     ) : (
       <table class="table">
-        <thead><tr><th>Juc\u0103tor</th><th>Data vi\u0219itei</th><th>Valabil p\u00e2n\u0103</th><th>Medic</th><th>Status</th></tr></thead>
+        <thead>
+          <tr>
+            <th>Jucător</th>
+            <th>Data vizitei</th>
+            <th>Valabil până</th>
+            <th>Medic</th>
+            <th>Clinică</th>
+            <th>Status</th>
+          </tr>
+        </thead>
         <tbody>
           {visits.map((v: any) => {
             const isExpired = v.valid_until && v.valid_until < today;
-            const isSoon = !isExpired && v.valid_until && (new Date(v.valid_until).getTime() - Date.now()) / 86400000 <= 30;
+            const isSoon = !isExpired && v.valid_until && v.valid_until <= in30;
             return (
               <tr>
                 <td style="font-weight:600">{v.first_name} {v.last_name}</td>
-                <td>{v.visit_date}</td>
-                <td style={`font-weight:600;color:${isExpired ? '#dc2626' : isSoon ? '#d97706' : '#16a34a'}`}>
-                  {v.valid_until || '\u2014'}
+                <td style="color:#6b7280;font-size:13px">{v.visit_date || '—'}</td>
+                <td style={`font-weight:700;color:${isExpired ? '#dc2626' : isSoon ? '#d97706' : '#16a34a'}`}>
+                  {v.valid_until
+                    ? new Date(v.valid_until + 'T00:00:00').toLocaleDateString('ro-RO')
+                    : '—'}
                 </td>
-                <td style="color:#6b7280;font-size:13px">{v.doctor_name || '\u2014'}</td>
+                <td style="color:#6b7280;font-size:13px">{v.doctor_name || '—'}</td>
+                <td style="color:#6b7280;font-size:13px">{v.clinic_name || '—'}</td>
                 <td>
-                  {isExpired && <span class="badge badge-red">Expirat</span>}
-                  {isSoon && <span class="badge badge-yellow">Expir\u0103 cur\u00e2nd</span>}
-                  {!isExpired && !isSoon && <span class="badge badge-green">Valid</span>}
+                  {isExpired && <span class="badge" style="background:#fee2e2;color:#991b1b">✕ Expirat</span>}
+                  {isSoon && <span class="badge" style="background:#fef9c3;color:#854d0e">⚠ Expiră curând</span>}
+                  {!isExpired && !isSoon && <span class="badge" style="background:#dcfce7;color:#166534">✓ Valid</span>}
                 </td>
               </tr>
             );
@@ -79,3 +89,16 @@ const expiringSoon = visits.filter((v: any) => {
     )}
   </div>
 </AdminLayout>
+
+<style>
+  .card { background:#fff; border:1px solid #e5e7eb; border-radius:14px; padding:20px; box-shadow:0 1px 4px rgba(0,0,0,.04); }
+  .table { width:100%; border-collapse:collapse; }
+  .table th { text-align:left; padding:14px 20px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:#9ca3af; border-bottom:2px solid #e5e7eb; background:#f9fafb; }
+  .table td { padding:14px 20px; font-size:14px; border-bottom:1px solid #f0f1f3; vertical-align:middle; }
+  .table tr:last-child td { border-bottom:none; }
+  .table tr:hover td { background:#f8fafc; }
+  .badge { display:inline-flex; align-items:center; padding:5px 13px; border-radius:999px; font-size:12px; font-weight:700; }
+  .alert { padding:16px 20px; border-radius:10px; font-size:14px; font-weight:500; margin-bottom:16px; }
+  .alert-error { background:#fef2f2; color:#991b1b; border:1.5px solid #fecaca; }
+  .alert-warning { background:#fffbeb; color:#92400e; border:1.5px solid #fde68a; }
+</style>

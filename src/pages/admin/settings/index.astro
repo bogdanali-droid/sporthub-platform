@@ -12,23 +12,23 @@ const club = clubId ? await db?.prepare('SELECT * FROM clubs WHERE id=?').bind(c
 const msg = Astro.url.searchParams.get('msg');
 const err = Astro.url.searchParams.get('err');
 ---
-<AdminLayout title="Set\u0103ri club">
-  {msg === 'salvat' && <div class="alert alert-success" style="margin-bottom:16px">Set\u0103ri salvate.</div>}
+<AdminLayout title="Setări club">
+  {msg === 'salvat' && <div class="alert alert-success" style="margin-bottom:16px">Setări salvate.</div>}
   {err && <div class="alert alert-error" style="margin-bottom:16px">Eroare la salvare.</div>}
 
   <div style="max-width:720px">
-    <h2 style="font-size:20px;font-weight:800;margin-bottom:20px">Set\u0103ri club</h2>
+    <h2 style="font-size:20px;font-weight:800;margin-bottom:20px">Setări club</h2>
 
     <div class="card">
       <form method="POST" action="/api/admin/settings">
-        <h3 style="font-size:14px;font-weight:700;margin-bottom:16px;color:#6b7280;text-transform:uppercase">Informa\u021bii generale</h3>
+        <h3 style="font-size:14px;font-weight:700;margin-bottom:16px;color:#6b7280;text-transform:uppercase">Informații generale</h3>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
           <div class="form-group">
             <label class="form-label">Numele clubului</label>
             <input name="name" class="form-input" value={club?.name ?? ''} required />
           </div>
           <div class="form-group">
-            <label class="form-label">Ora\u0219</label>
+            <label class="form-label">Oraș</label>
             <input name="city" class="form-input" value={club?.city ?? ''} />
           </div>
         </div>
@@ -47,7 +47,7 @@ const err = Astro.url.searchParams.get('err');
           <input name="website" class="form-input" value={club?.website ?? ''} />
         </div>
         <div class="form-group">
-          <label class="form-label">Adres\u0103</label>
+          <label class="form-label">Adresă</label>
           <input name="address" class="form-input" value={club?.address ?? ''} />
         </div>
         <div class="form-group">
@@ -65,7 +65,7 @@ const err = Astro.url.searchParams.get('err');
           </div>
         </div>
         <div style="display:flex;justify-content:flex-end">
-          <button type="submit" class="btn btn-primary">Salveaz\u0103</button>
+          <button type="submit" class="btn btn-primary">Salvează</button>
         </div>
       </form>
     </div>
